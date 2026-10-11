@@ -13,6 +13,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 - `jwt`, `webhooks`, `oauth2`, and `sigv4` 0.3.0.1: import `crypto` 0.2.2.1, so native builds on Bend 2.0.36 compile.
 - `llm`, `webhooks`, `sigv4`, `jwt`, and `oauth2` 0.3.0.0: import `hairpin` 0.3.0.0, `bend-kit-http@0.32.0.0`, and `time` 0.1.2.1, so they check on Bend 2.0.36. Breaking: `Http` and `Time` types come from those versions. The local test servers in `check.bend` use the current `Http.conn`.
 - `hairpin` 0.3.0.0: imports `bend-kit-http@0.32.0.0` instead of `0.23.0.1`, and `time` 0.1.2.1, so it checks on Bend 2.0.36. Breaking: `Http` and `Time` types come from those versions.
+- `scheduler` 0.1.0.0: pure deadline/FIFO queues, one-shot running tokens and cancellation, and fixed-rate/fixed-delay recurrence with Skip and bounded CatchUp, quantified proofs, a monotonic worker consumer, and standard-library benchmarks.
 - `multipart` 0.1.1.1: imports `crypto` 0.2.2.1, so native builds on Bend 2.0.36 compile.
 - CI runs Bend 2.0.36.
 - `camber` 0.7.0.0: imports `bend-kit-http@0.32.0.0` and requires Bend 2.0.36. `submit` answers the `Chan.send` result, so a failed submit gives back its message. A resource that cannot return to its owner goes to `destroy`. It imports `time` 0.1.2.1, `wire` 0.4.6.1, `files` 0.1.1.1, and `notch` 0.1.0.1, so `Time` and `Wire` match `http` 0.32.0.0 and native builds compile.
