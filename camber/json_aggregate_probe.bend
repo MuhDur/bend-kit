@@ -5,7 +5,7 @@ import ./json_disposal_control.bend as JsonDisposal
 import ./interface_check.bend as Registry
 import ../http/http.bend as Http
 import ../http/context_probe.bend as Transport
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-time@0.2.0.0/time.bend as Time
 
 type Context is Data:
   Context{mode: String, ready: Chan(Unit), go: Chan(Unit)}

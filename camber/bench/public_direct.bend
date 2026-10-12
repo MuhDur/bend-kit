@@ -1,12 +1,12 @@
 import Base
 import ./public_app.bend as A
 import ./public_main.bend as M
-import bend-kit-camber@0.7.0.0/camber.bend as C
-import bend-kit-http@0.32.0.0/http.bend as H
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as B
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-camber@0.8.0.0/camber.bend as C
+import bend-kit-http@0.33.0.0/http.bend as H
+import bend-kit-bytes@0.3.2.0/bytes.bend as B
+import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-int@0.2.0.0/int.bend as Int
-import bend-kit-files@0.1.1.1/files.bend as F
+import bend-kit-files@0.2.0.0/files.bend as F
 
 def payload(label: String) -> H.Body:
   match label:

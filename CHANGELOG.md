@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `camber` 0.8.0.0, `hairpin` 0.6.0.0: import `http` 0.33.0.0 and the converged siblings by name. `hairpin` imports one `time` (0.2.0.0) for both wall and monotonic clocks, so it no longer pulls two versions of the `time` C effect into one program. Breaking: `Http`, `Time`, `Json`, and `Bytes` types come from the converged versions.
 - `archive` 0.3.0.0, `http` 0.33.0.0, `runner` 0.2.0.0: import the converged siblings by name. `http` takes `bytes` 0.3.2.0, `json` 0.6.0.0, `encoding` 0.4.0.0, `http2` 0.3.0.0, `zlib` 0.3.0.0, `url` 0.4.1.0, and `time` 0.2.0.0. Breaking: `Http` `Instant`s are `time` 0.2.0.0 values, and `Bytes` is the 0.3.2.0 type.
 - `journal` 0.2.0.0, `notch` 0.2.0.0, `stream` 0.2.0.0, `zlib` 0.3.0.0: import the converged siblings by name: `bytes` 0.3.2.0, `hash` 0.2.0.0, `files` 0.2.0.0, and `time` 0.2.0.0. Breaking: `Bytes`, `Instant`, and `files` types in their APIs come from those versions.
 - `cbor` 0.2.0.0, `csv` 0.2.0.0, `encoding` 0.4.0.0, `files` 0.2.0.0, `hash` 0.2.0.0, `http2` 0.3.0.0, `json` 0.6.0.0, `multipart` 0.2.0.0, `process` 0.3.0.0, `property` 0.3.0.0, `regex` 0.7.0.0, `time` 0.2.0.0, `postgres` 0.2.0.0, `redis` 0.2.0.0: import `bend-kit-bytes@0.3.2.0` by name, in place of the 0.3.0.0 hash pin or 0.3.1.0. `regex` imports `bend-kit-unicode@0.1.0.0` by name. Breaking: `Bytes` in their APIs is the 0.3.2.0 type. Their READMEs are checked against the code.

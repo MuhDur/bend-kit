@@ -1,13 +1,10 @@
 # Hairpin: an HTTP client with a base URL, default headers, a pool, cookies, mTLS, redirects, and proven retries. Source: https://github.com/paymog/bend-kit/tree/main/hairpin
 import Base
-import bend-kit-http@0.32.0.0/http.bend as Http
-import bend-kit-time@0.1.2.1/time.bend as Time
-# Http takes time 0.1.2.1 Instants; the monotonic Nat clock comes from 0.1.3.0.
-import bend-kit-time@0.1.3.0/time.bend as Clock
-# By hash, as http imports them: bend-kit-url@0.4.1.0, -json@0.5.0.1, -bytes@0.3.0.0.
-import 0x1f2d80f53f971b16c6de6a65cb1918ae/url.bend as Url
-import 0x584fc27920487ceab242392391418d7f/json.bend as Json
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-time@0.2.0.0/time.bend as Time
+import bend-kit-url@0.4.1.0/url.bend as Url
+import bend-kit-json@0.6.0.0/json.bend as Json
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 
 # base: "" for none. headers: lowercase names. ms: the step timeout. policy: attempts, backoff, and deadline of each request.
@@ -173,7 +170,7 @@ type Step<-R: Type> is Type:
 def clock(need: Bool) -> IO(Nat):
   match need:
     case True{}:
-      Clock.mono.ms()
+      Time.mono.ms()
     case False{}:
       IO.pure(Nat, 0n)
 

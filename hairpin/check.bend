@@ -1,13 +1,12 @@
 import Base
 import ./hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-http@0.32.0.0/http.bend as Http
-import bend-kit-http@0.32.0.0/admission.bend as Admission
-import bend-kit-http@0.32.0.0/completion.bend as Completion
-import bend-kit-time@0.1.2.1/time.bend as Time
-import bend-kit-time@0.1.3.0/time.bend as Clock
-import 0x584fc27920487ceab242392391418d7f/json.bend as Json
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-http@0.33.0.0/admission.bend as Admission
+import bend-kit-http@0.33.0.0/completion.bend as Completion
+import bend-kit-time@0.2.0.0/time.bend as Time
+import bend-kit-json@0.6.0.0/json.bend as Json
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 def ok(b: Bool, +name: String) -> IO(Unit):
   match b:
@@ -234,9 +233,9 @@ def took(t0: Nat, t1: Nat) -> IO(Unit):
 def deadlines() -> IO(Unit):
   do IO<Unit>:
     ch : Chan(Unit) <- server(47832, [slow(), slow()])
-    t0 : Nat <- Clock.mono.ms()
+    t0 : Nat <- Time.mono.ms()
     r1 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(Hairpin.deadline(Hairpin.retry(at(47832), 5), 1500), "x")
-    t1 : Nat <- Clock.mono.ms()
+    t1 : Nat <- Time.mono.ms()
     c1 : Hairpin.Client <- got("the deadline stops the retries after 2 attempts", 503, "slow", r1)
     took(t0, t1)
     r2 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(Hairpin.deadline(c1, 0), "x")
@@ -280,7 +279,7 @@ def nested.call(x: Hairpin.Client & Retry.Budget) -> IO(Hairpin.Client & Retry.B
 def nested() -> IO(Unit):
   do IO<Unit>:
     ch : Chan(Unit) <- server(47834, [busy(), busy(), busy(), busy()])
-    now : Nat <- Clock.mono.ms()
+    now : Nat <- Time.mono.ms()
     b0 : Retry.Budget = Retry.Budget.new(4n, now, None{})
     r1 : Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.request.in(Hairpin.retry(at(47834), 2), b0, "GET", "x", Http.empty(), Bytes.new(0))
     x1 : Hairpin.Client & Retry.Budget <- got.in("nested: the first call takes 3", 503, "busy", r1)

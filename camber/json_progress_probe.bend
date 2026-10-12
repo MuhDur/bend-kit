@@ -6,7 +6,7 @@ import ../json/json.bend as Json
 import ../http/http.bend as Http
 import ../http/context_probe.bend as Transport
 import bend-kit-wire@0.4.6.1/wire.bend as Wire
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-time@0.2.0.0/time.bend as Time
 import ./prerequisites.bend as Probe
 
 type Context is Data:
