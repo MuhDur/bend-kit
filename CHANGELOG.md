@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `time` 0.1.3.0: `mono.ms` and `mono.us` read the monotonic clock as a `Nat` of milliseconds or microseconds, through the pure `Duration.to_ms_nat` and `Duration.to_us_nat`.
 - `hairpin` 0.4.0.0: imports the retry policy from `bend-kit-retry@0.1.0.0`. Breaking: `bend-kit-hairpin@0.4.0.0/retry.bend` is gone; import `bend-kit-retry@0.1.0.0/retry.bend`, and `Retry` types come from that package. The retry laws and proofs moved there too.
 - `retry` 0.1.0.0: new package. Hairpin's retry policy (attempt budget, deadline, backoff, circuit breaker) and its proofs, with no HTTP imports.
 - `cache` 0.1.0.0: cache validity for keyed values. Fetches take per-key generations; a completion lands only at or above the key's floor, then raises it. Invalidation voids fetches in flight, eviction keeps generations, and entries expire by TTL or negative TTL from the fetch start. Proved over any sequence of operations on a key: no expired read, stale completions stay stale, an older fetch cannot overwrite a newer one, and eviction changes only the current entry.
