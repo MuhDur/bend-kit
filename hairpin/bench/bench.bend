@@ -4,7 +4,7 @@ import Base
 import ../hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import bend-kit-http@0.32.0.0/http.bend as Http
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-time@0.1.3.0/time.bend as Time
 import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
 
 # A failed request scores 0, so it changes the checksum.
@@ -30,11 +30,6 @@ def loop(n: Nat, +url: String, +sum: U32, r: Hairpin.Client & Result<&1, &1, Hai
         got : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(c, url)
         loop(p, url, next, got)
 
-# Microseconds on the monotonic clock.
-def us(r: U32 & U32 & U32) -> Nat:
-  (hi, lo, ns) = r
-  Nat.add(Nat.mul(Nat.add(Nat.mul(U32.to_nat(hi), 1n+4294967295n), U32.to_nat(lo)), 1000000n), U32.to_nat((ns / 1000 : U32)))
-
 def pad3(+s: String) -> String:
   Bool.pick(String, Nat.is_lt(String.length(s), 2n), "00" ++ s, Bool.pick(String, Nat.is_lt(String.length(s), 3n), "0" ++ s, s))
 
@@ -49,10 +44,10 @@ def report(+op: String, +t0: Nat, +t1: Nat, r: Hairpin.Client & U32) -> IO(Unit)
 
 def run(+op: String, +url: String, c: Hairpin.Client) -> IO(Unit):
   do IO<Unit>:
-    t0 : U32 & U32 & U32 <- Time.mono.raw()
+    t0 : Nat <- Time.mono.us()
     r : Hairpin.Client & U32 <- loop(1000n, url, 0, (c, Fail{Hairpin.ErrHttp{Http.ErrBad{}}}))
-    t1 : U32 & U32 & U32 <- Time.mono.raw()
-    report(op, us(t0), us(t1), r)
+    t1 : Nat <- Time.mono.us()
+    report(op, t0, t1, r)
 
 def main() -> IO(Unit):
   c = Hairpin.header(Hairpin.base(Hairpin.new(), "http://127.0.0.1:47840/api/"), "x-bench", "1")

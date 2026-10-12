@@ -1,7 +1,7 @@
 import Base
 import bend-kit-concurrency@0.2.0.0/concurrency.bend as Conc
 import ./queue.bend as Q
-import ./clock.bend as Clock
+import bend-kit-time@0.1.3.0/time.bend as Time
 import ./recurrence.bend as R
 import ./check.bend as Check
 
@@ -58,7 +58,7 @@ def run(fuel: Nat, s: Q.State<U32>, expected: List<U32>) -> IO(Unit):
       IO.die(Unit, 1, "timer consumer exhausted its polling fuel")
     case 1n+p Con{x, xs}:
       do IO<Unit>:
-        raw : Nat <- Clock.now()
+        raw : Nat <- Time.mono.ms()
         +now : Nat = raw
         outcome : Check.Outcome<Maybe<&2, U32>> <- execute.selected(now, Q.select(~U32, now, s))
         +step : Check.Outcome<Maybe<&2, U32>> = outcome
@@ -119,7 +119,7 @@ def recurring.first(s: Q.State<U32>, ticket: Maybe<&2, Q.Ticket<U32>>) -> IO(Uni
       do IO<Unit>:
         outputs : List<Unit> & List<U32> <- Conc.pool(~Unit, ~U32, ~U32, ~work, [Unit{}], [payload])
         result(outputs, payload)
-        finished : Nat <- Clock.now()
+        finished : Nat <- Time.mono.ms()
         recurring.plan(R.plan(deadline, finished, 5n, R.FixedDelay{}), s, id)
 
 def recurring() -> IO(Unit):
@@ -129,7 +129,7 @@ def recurring() -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    now : Nat <- Clock.now()
+    now : Nat <- Time.mono.ms()
     start(now)
     running_cancel()
     recurring()

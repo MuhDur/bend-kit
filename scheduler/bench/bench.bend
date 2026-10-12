@@ -1,6 +1,6 @@
 import Base
 import ../queue.bend as Q
-import ../clock.bend as Clock
+import bend-kit-time@0.1.3.0/time.bend as Time
 
 def fill(n: Nat, s: Q.State<U32>) -> Q.State<U32>:
   match n:
@@ -30,10 +30,10 @@ def drain(fuel: Nat, pair: Q.State<U32> & U32) -> U32:
 
 def report(+start: Nat, +checksum: U32) -> IO(Unit):
   do IO<Unit>:
-    stop : Nat <- Clock.now_us()
+    stop : Nat <- Time.mono.us()
     IO.print(Nat.show((stop - start : Nat)) ++ "e-3\t" ++ U32.show(checksum))
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    start : Nat <- Clock.now_us()
+    start : Nat <- Time.mono.us()
     report(start, drain(1024n, (fill(1024n, Q.new(U32)), 0)))

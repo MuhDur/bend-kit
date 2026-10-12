@@ -49,5 +49,5 @@ Versions: Bend 2.0.35 with `hairpin` 0.2.0.0 and `http` 0.23.0.1, Apple clang 17
 - Hairpin sends `accept-encoding: gzip, deflate, br, zstd` and checks for the brotli and zstd libraries on each request. The server sends no coding.
 - Hairpin reads the clock only when a decision needs it: with no deadline and no breaker, a success reads none. `retry_1000` has a breaker, so it reads the monotonic clock, the wall clock (for `Retry-After`), and the random source on each 503.
 - ky waits on a timer even for `Retry-After: 0`, so its row is mostly timer delay.
-- Bend times itself with `Time.mono.raw`, a nanosecond clock.
+- Bend times itself with `Time.mono.us`, monotonic microseconds.
 - These are micro-benchmarks on one machine.
