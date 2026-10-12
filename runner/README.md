@@ -144,6 +144,5 @@ The record is a u32le tag (1 to 6), then u64le fields, then the payload for `Enq
 - two failing jobs open their target's breaker; no third attempt starts, and the held jobs wait for the cooldown;
 - the webhook example delivers two signed events through a 503.
 
-The webhook example does not build natively yet: `bend-kit-hairpin@0.5.1.0` imports two versions of `bend-kit-time`, and `-o` refuses two versions of one C effect ([bendlang/bend#1533](https://github.com/bendlang/bend/issues/1533)). `crash.bend` and programs without hairpin build natively.
 
 `bench/` times replay at `open`. See [bench/README.md](bench/README.md).

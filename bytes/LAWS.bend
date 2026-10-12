@@ -1,6 +1,6 @@
 import Base
 import ./bytes.bend as Bytes
-import 0x4eed9d7ac6ece61523d747a9d804e4f0/int.bend as Int
+import bend-kit-int@0.2.0.0/int.bend as Int
 
 def bytes(xs: List<&2, U32>) -> String:
   match xs:
