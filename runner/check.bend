@@ -6,6 +6,7 @@ import bend-kit-files@0.2.0.0/files.bend as Files
 import bend-kit-collections@0.1.2.0/heap.bend as H
 import bend-kit-collections@0.1.2.0/omap.bend as O
 import ./runner.bend as R
+import ./example.bend as Example
 
 def ok(good: Bool, +name: String) -> IO(Unit):
   match good:
@@ -273,6 +274,7 @@ def all(+dir: String) -> IO(Unit):
     durable(dir)
     crash(dir)
     breaker(dir)
+    Example.run(dir ++ "/hooks.journal")
 
 def main() -> IO(Unit):
   do IO<Unit>:

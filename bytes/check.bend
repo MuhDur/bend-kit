@@ -1,6 +1,6 @@
 import Base
 import ./bytes.bend as Bytes
-import 0x4eed9d7ac6ece61523d747a9d804e4f0/int.bend as Int
+import bend-kit-int@0.2.0.0/int.bend as Int
 
 # The laws run in the checker, where Array is a tree of defs. This runs the same
 # operations on the runtime's native Array, at sizes the checker would not reach.
