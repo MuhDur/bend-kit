@@ -4,13 +4,13 @@ import ./camber.bend as C
 import ./notices.bend as N
 import ./serving_check.bend as Existing
 import ./input.bend as Input
-import bend-kit-json@0.5.1.0/json.bend as J
-import bend-kit-http@0.32.0.0/http.bend as H
-import bend-kit-http@0.32.0.0/completion.bend as T
-import bend-kit-notch@0.1.0.1/notch.bend as Notch
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-json@0.6.0.0/json.bend as J
+import bend-kit-http@0.33.0.0/http.bend as H
+import bend-kit-http@0.33.0.0/completion.bend as T
+import bend-kit-notch@0.2.0.0/notch.bend as Notch
+import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-int@0.2.0.0/int.bend as Int
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as B
+import bend-kit-bytes@0.3.2.0/bytes.bend as B
 
 type Config is Data:
   Config{mode: String, gate: Chan(Unit), stats: Chan(H.ServerStats)}

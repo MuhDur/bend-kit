@@ -1,10 +1,10 @@
 import Base
 import ./hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-http@0.32.0.0/http.bend as Http
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-int@0.2.0.0/int.bend as Int
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 def hs(k: String, v: String) -> Map<&2, List<&2, String>>:
   Http.set(Http.empty(), k, v)
