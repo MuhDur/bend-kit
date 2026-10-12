@@ -1,8 +1,8 @@
 # Journal recovery benchmark: the Bend side (see README.md).
 import Base
 import ../../time/time.bend as Time
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
-import bend-kit-hash@0.1.0.0/hash.bend as Hash
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-hash@0.2.0.0/hash.bend as Hash
 import ../journal.bend as J
 
 # Payload length is 16 + (i * 7 mod 48). Octet j is (i * 31 + j) & 255.

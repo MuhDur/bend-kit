@@ -1,8 +1,7 @@
 # Append-only journal: checksummed frames, fsync'd appends, and crash recovery of the committed prefix. Source: https://github.com/paymog/bend-kit/tree/main/journal
 import Base
-# bend-kit-bytes@0.3.0.0, the version bend-kit-hash@0.1.0.0 takes, so Hash.crc32 accepts these Bytes.
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
-import bend-kit-hash@0.1.0.0/hash.bend as Hash
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-hash@0.2.0.0/hash.bend as Hash
 
 # A frame is one record and one commit: three u32 little-endian fields, then the payload.
 # len, then U32.not(len), then the CRC-32 of the payload, then len payload octets.

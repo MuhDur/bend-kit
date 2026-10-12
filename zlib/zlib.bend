@@ -1,6 +1,6 @@
 # DEFLATE, gzip, and zlib encoding and decoding (RFC 1951, 1952, 1950) over byte strings, plus gzip, zstd, and brotli through the C libraries. Source: https://github.com/paymog/bend-kit/tree/main/zlib
 import Base
-import bend-kit-hash@0.1.0.0/hash.bend as Hash
+import bend-kit-hash@0.2.0.0/hash.bend as Hash
 
 # Bytes are one Char per octet (0..255), as everywhere in bend-kit.
 
