@@ -1,11 +1,10 @@
 # Non-cryptographic hashes over Bytes: FNV-1a, xxHash, SipHash-1-3, CRC-32, and Adler-32. Source: https://github.com/paymog/bend-kit/tree/main/hash
 import Base
-# bend-kit-bytes@0.3.0.0
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 # Each hash hands the buffer back beside its value. A buffer's bytes at or past len are 0.
 # Each hash also has a .str form over a byte string (one Char per octet), copied to Bytes first.
-#   import bend-kit-hash@0.1.0.0/hash.bend as Hash
+#   import bend-kit-hash@0.2.0.0/hash.bend as Hash
 
 # A 64-bit value as two halves. Base has no native U64, and int's U64 is a bit list.
 type W64 is Data:
