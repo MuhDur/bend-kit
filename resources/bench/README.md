@@ -4,12 +4,14 @@ This times the lease hot path of `http` admission: take one unit from a pool of 
 
 ## Run
 
+Run these commands from `resources/bench/`.
+
 ```sh
 python3 run.py      # 3 runs per variant, median
 python3 run.py 5    # 5 runs
 ```
 
-You need `bend` (2.0.35, the CI pin), `cc`, `cargo`, `bun`, `node`, `npm`, and `python3`. `run.py` installs `async-sema@3.1.1` into `out/js`, and cargo fetches `tokio`. Binaries go to `out/`, which git ignores. It exits non-zero if a build or install fails, or if two programs disagree on the checksum.
+You need `bend`, `cc`, `cargo`, `bun`, `node`, `npm`, and `python3`. The recorded results used Bend 2.0.35. `run.py` installs `async-sema@3.1.1` into `out/js`, and Cargo fetches `tokio`. Binaries go to `out/`, which git ignores. The script exits non-zero if a build or install fails, or if two programs disagree on the checksum.
 
 ## The op
 
@@ -39,11 +41,12 @@ Every program prints the checksum 32522240.
 
 ## Reading it
 
-- The Bend loop is pure and has one owner, so it does no atomic operation. Each baseline is a thread-safe semaphore, and each take or give is an atomic read-modify-write. The Bend number measures the transitions, not synchronization.
+- The Bend loop is pure and has one owner, so it does no atomic operation. The baselines use semaphore implementations with different synchronization costs. Rust returns all 64 permits in one call per round. The Bend number measures pure transitions, not synchronization.
 - At R = 2^24 the native Bend binary takes about 350 ms on one thread, which is about 0.17 ns for each operation. That is less than one clock cycle, so the compiled loop does not run each transition as a separate step. Its checksum still equals `64R*31 + R` at 2^14, 2^18, 2^20, and 2^24. A real pool pays more.
 - `http` admission runs these transitions inside one actor. Each take and give there also costs a channel round trip, which this bench does not time.
 
 ## Caveats
 
 - Bend times itself with `Time.mono`, a nanosecond clock. It reads R from argv, so the work cannot run before the clock starts.
+- Bend reads the stop time after it prints the checksum. The measured time includes checksum output.
 - One machine, one size, one thread.

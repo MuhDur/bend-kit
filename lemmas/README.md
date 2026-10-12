@@ -26,8 +26,12 @@ def Laws.fits_exact(len, i, n):
 | `u32_to_from_nat`, `u32_from_to_nat` | `from_nat` and `to_nat` are inverses below `2^32` |
 | `u32_fits_nat` | `n <= len && i <= len - n` holds exactly when `i + n <= len` |
 
-Each `u32_` law has a `word_` form for `Word(n)` and every `n`, with `pow2(n)` in place of `2^32`. `word_adc_nat` is the general adder law: the word sum plus the carry-out weight `2^n` is `c + a + b`.
+The word laws cover value bounds, injectivity, comparison, addition, subtraction, and increment for every `Word(n)`. They use `pow2(n)` in place of `2^32`. `word_adc_nat` relates the word sum and carry-out to the full sum. There are no `word_` forms of the `U32` conversion or bounds-check laws.
 
 Write `2^32` as `Lemmas.pow2(32n)`. A `Nat` literal stops at `4294967295n`.
+
+| def | result |
+|---|---|
+| `pow2(n: Nat)` | `Nat`; computes `2^n`. Keep large powers folded in proofs. |
 
 Do not make the checker unfold `pow2(32n)`. When a conversion check must compare two terms that differ somewhere and that contain `pow2(32n)`, it expands `2^32` into successors and overflows the stack (bendlang/bend#1071, a known limit). Move a bound across an equation with `Lemmas.lt_rw` or a `%` rewrite, so that each side matches the other exactly. `u32_add_nat` and `u32_add_mod` show both.

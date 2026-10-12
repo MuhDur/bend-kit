@@ -47,6 +47,10 @@ def main() -> Bool:
 
 `decide(p, req)` answers the `Decision`. `granted(p, req)` answers `True{}` only for `Allow`: default deny. Use `DenyOverrides` to add rules, and `Intersect` to restrict a policy by another.
 
+| def | returns |
+|---|---|
+| `matches(t: Target, +req: Request) -> Tri` | `Yes`, `No`, or `Unknown` for the target and request. |
+
 ## Laws
 
 `LAWS.bend` states these for every policy, target, and request. `PROOF.bend` proves them.
@@ -61,8 +65,8 @@ def main() -> Bool:
 | `forbid_narrows` | `DenyOverrides{p, Forbid{t}}` grants only what `p` grants |
 | `missing_never_grants` | if a request with missing fields is granted, every request that fills them in is granted too. Missing information never grants what the full information would not. |
 | `forbid_unknown_denies` | a forbid whose target needs a missing field denies |
-| `deny_overrides_comm`, `_assoc`, `_idem`, `_unit` | `DenyOverrides` is commutative, associative, and idempotent, with unit `Permit{Nobody}` |
-| `intersect_comm`, `_assoc`, `_idem`, `_unit` | `Intersect` is commutative, associative, and idempotent, with unit `Permit{Everyone}` |
+| `deny_overrides_comm`, `deny_overrides_assoc`, `deny_overrides_idem`, `deny_overrides_unit` | `DenyOverrides` is commutative, associative, and idempotent, with unit `Permit{Nobody}` |
+| `intersect_comm`, `intersect_assoc`, `intersect_idem`, `intersect_unit` | `Intersect` is commutative, associative, and idempotent, with unit `Permit{Everyone}` |
 
 ## Trust boundary
 

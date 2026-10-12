@@ -20,7 +20,11 @@ c : Result<&1, &1, U32 & String, WS.Conn> <- WS.connect("127.0.0.1", 8080, "loca
 - **Messages** (§5.4). `feed` joins fragments, passes control frames through between them, rejects orphan continuations and interleaved data frames, caps the total size, and requires UTF-8 in text messages (1007).
 - **Connection**. `recv` returns `Text`, `Binary`, `Pong`, or `Closed`. It answers pings, echoes the peer's close, and on a protocol fault sends close with the fault's code and fails with it. EOF inside a frame fails with 1006. A `Conn` built with `server` true reads masked frames and sends clear ones, for a socket an HTTP server upgraded; its input is a `Bytes.Cursor` (`Bytes.Cursor.new(rest)` for octets read past the HTTP head).
 
-Errors are `(code, why)`: 1000 and up is the §7.4 close code at fault, anything lower is the errno of a socket or crypto effect.
+Errors are `(code, why)`. Codes of 1000 and above are RFC 6455 §7.4 close codes. Lower codes are socket or crypto error numbers.
+
+| Def | Result | Use |
+|---|---|---|
+| `utf8.valid(b: Bytes.Bytes)` | `Bytes.Bytes & Bool` | Return the input bytes and whether they contain valid UTF-8. |
 
 Not covered: extensions (permessage-deflate) and subprotocol negotiation, the server side of the opening handshake, host names (resolve with `dns` first), and frames or messages of 2 GiB and up.
 

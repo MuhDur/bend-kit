@@ -16,6 +16,10 @@ Use those sibling versions when you pass bytes or doubles to the codec. A differ
 
 A `Field` has a field number and a `Value`: `Varint`, `Fixed32`, `Fixed64`, `Blob`, or `Group`. Varints and fixed64 values use `Word64{hi, lo}`. Signed32 values are two's-complement `U32` bits. Signed64 values are two's-complement `Word64` bits. The `from_*` and `to_*` scalar helpers apply the protobuf representation, including signed varints and zigzag.
 
+| Def | Result | Use |
+|---|---|---|
+| `from_sint64(v: Word64)` | `Value` | Encode signed 64-bit bits as a zigzag varint. |
+
 The wire codec accepts field numbers 1 through 536870911. The schema compiler reserves numbers 19000 through 19999, but a decoder retains unknown wire fields in that range. Wire types 0, 1, 2, 3, 4, and 5 are supported. Group end tags must match their start tags.
 
 `max_size` bounds the input and output message. The protobuf limit of 2147483647 bytes also applies. Set a much smaller limit for untrusted input. `depth` bounds group nesting; generated codecs also bound embedded-message nesting.

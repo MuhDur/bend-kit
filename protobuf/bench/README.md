@@ -8,7 +8,7 @@ python3 -m venv /tmp/protobuf-venv
 PATH=/tmp/protobuf-venv/bin:$PATH /tmp/protobuf-venv/bin/python protobuf/bench/run.py
 ```
 
-Install `protoc`, `protobuf-c`, `pkg-config`, Rust/Cargo, a C compiler, and Bun first. On macOS, `brew install protobuf protobuf-c pkg-config rust` supplies the native tools. The runner installs `protobufjs` in the ignored `out/` folder and builds Rust with `prost`. It does not publish a Bend package.
+Install `bend`, `protoc`, `protobuf-c`, `pkg-config`, Rust/Cargo, a C compiler, and Bun first. On macOS, `brew install protobuf protobuf-c pkg-config rust` supplies the native tools. The runner installs `protobufjs` in the ignored `out/` folder and builds Rust with `prost`. It does not publish a Bend package.
 
 `bench.proto` defines one message with uint32, a UTF-8 string, packed repeated uint32, double, and bytes. The fixed input has count 150, title `protobuf fixture`, samples 0 through 63, double 1/3, and payload octets 0 through 255. Official Python Protobuf produces the 355-byte fixture.
 
@@ -31,6 +31,8 @@ These are small-fixture timings, not a claim about arbitrary message sizes or ma
 ## Duplicate-child merge scaling
 
 The native interoperability program receives `8201022001` repeated N times. Each fragment merges one unknown varint into the same singular Child. The table reports median whole-process wall time from three sequential runs, including startup.
+
+These are historical measurements. The command and tool versions for this scaling run were not recorded here. `python3 protobuf/interop.py` checks duplicate-child merge behavior, but it does not reproduce this timing table.
 
 | Fragments | Before, ms | After, ms | Encoded bytes |
 |---:|---:|---:|---:|
