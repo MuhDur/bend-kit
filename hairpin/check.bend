@@ -311,6 +311,67 @@ def judged() -> IO(Unit):
     Hairpin.close(nested.c(x1))
     served("judged: 3 attempts", ch)
 
+# Any status but 200 may clear, after Retry-After: 0.
+def judge.stream.res(x: Http.Stream & Http.Res) -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>:
+  (st, res) = x
+  Http.Res{+s, h, b} = res
+  (Done{st}, Bool.pick(Maybe<&2, String>, U32.is_eq(s, 200), None{}, Some{"0"}))
+
+def judge.stream(r: Result<&1, &1, Http.Err, Http.Stream>) -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>:
+  match r:
+    case Fail{e}:
+      (Fail{e}, Some{"0"})
+    case Done{st}:
+      judge.stream.res(Http.stream.res(st))
+
+def piece(r: Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> String:
+  match r:
+    case Fail{e}:
+      "<read failed>"
+    case Done{m}:
+      match m:
+        case None{}:
+          ""
+        case Some{b}:
+          Bytes.to_string(b)
+
+def streamed.read(+name: String, +s: U32, x: Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> IO(Unit):
+  (st, r) = x
+  +seen = piece(r)
+  do IO<Unit>:
+    Http.stream.close(st)
+    ok(Bool.and(U32.is_eq(s, 200), String.eq(seen, "fine")), name ++ " (" ++ U32.show(s) ++ " " ++ seen ++ ")")
+
+def streamed.head(+name: String, x: Http.Stream & Http.Res) -> IO(Unit):
+  (st, res) = x
+  Http.Res{+s, h, b} = res
+  do IO<Unit>:
+    y : Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>> <- Http.stream.read(st)
+    streamed.read(name, s, y)
+
+def streamed(+name: String, +want: Nat, r: Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream>) -> IO(Hairpin.Client):
+  (c, b, m) = r
+  Retry.Budget{+left, d} = b
+  match m:
+    case Fail{e}:
+      IO.die(Hairpin.Client, 1, "FAIL " ++ name ++ ": no stream opened")
+    case Done{st}:
+      do IO<Hairpin.Client>:
+        streamed.head(name, Http.stream.res(st))
+        ok(Nat.is_eq(left, want), name ++ ": " ++ Nat.show(left) ++ " attempts left in the budget")
+        return c
+
+# Two refused streams close and the third opens, all on one budget of 4.
+def opened() -> IO(Unit):
+  do IO<Unit>:
+    ch : Chan(Unit) <- server(47836, [busy(), busy(), fine()])
+    b0 : Retry.Budget = Retry.Budget.new(4n, 0n, None{})
+    r1 : Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream> <-
+      Hairpin.open.as(~judge.stream, Hairpin.retry(at(47836), 2), b0, True{}, "identity", "GET", "x", Http.empty(), Bytes.new(0))
+    c1 : Hairpin.Client <- streamed("open.as: 503, 503, then a 200 stream", 1n, r1)
+    Hairpin.close(c1)
+    served("opened: 3 attempts", ch)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     basics()
@@ -319,3 +380,4 @@ def main() -> IO(Unit):
     breaker()
     nested()
     judged()
+    opened()
