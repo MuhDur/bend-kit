@@ -1,9 +1,8 @@
 import Base
-# bend-kit-bytes@0.3.0.0
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import bend-kit-scheduler@0.2.0.0/queue.bend as Q
-import bend-kit-files@0.1.1.1/files.bend as Files
+import bend-kit-files@0.2.0.0/files.bend as Files
 import bend-kit-collections@0.1.2.0/heap.bend as H
 import bend-kit-collections@0.1.2.0/omap.bend as O
 import ./runner.bend as R

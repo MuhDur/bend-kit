@@ -3,10 +3,10 @@
 A durable job runner (an outbox). It keeps a scheduler queue in a journal, bounds the attempts that run at once with a resources pool, and retries failed jobs with retry's policy and a breaker per target.
 
 ```bend
-import bend-kit-runner@0.1.0.0/runner.bend as R
+import bend-kit-runner@0.2.0.0/runner.bend as R
 ```
 
-It imports `bend-kit-journal@0.1.0.0`, `bend-kit-scheduler@0.2.0.0`, `bend-kit-resources@0.1.0.0`, `bend-kit-retry@0.1.0.0`, `bend-kit-time@0.1.3.0`, `bend-kit-collections@0.1.2.0`, and `bend-kit-bytes@0.3.0.0` (`0x49814d83de8f70993a43e1002be29ecd/bytes.bend`). Payload codecs take and give that version's `Bytes`. Policies, budgets, and outcomes are `bend-kit-retry@0.1.0.0` types; tickets are `bend-kit-scheduler@0.2.0.0` types.
+It imports `bend-kit-journal@0.2.0.0`, `bend-kit-scheduler@0.2.0.0`, `bend-kit-resources@0.1.0.0`, `bend-kit-retry@0.1.0.0`, `bend-kit-time@0.2.0.0`, `bend-kit-collections@0.1.2.0`, and `bend-kit-bytes@0.3.2.0`. Payload codecs take and give that version's `Bytes`. Policies, budgets, and outcomes are `bend-kit-retry@0.1.0.0` types; tickets are `bend-kit-scheduler@0.2.0.0` types.
 
 ```mermaid
 flowchart LR
@@ -26,9 +26,9 @@ A job is a `String`. `work` prints it and succeeds. The journal file keeps the j
 
 ```bend
 import Base
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-runner@0.1.0.0/runner.bend as R
+import bend-kit-runner@0.2.0.0/runner.bend as R
 
 def penc(s: String) -> Bytes.Bytes:
   Bytes.from_string(s)
@@ -144,6 +144,6 @@ The record is a u32le tag (1 to 6), then u64le fields, then the payload for `Enq
 - two failing jobs open their target's breaker; no third attempt starts, and the held jobs wait for the cooldown;
 - the webhook example delivers two signed events through a 503.
 
-The webhook example does not build natively yet: `bend-kit-hairpin@0.4.0.0` imports two versions of `bend-kit-time`, and `-o` refuses two versions of one C effect ([bendlang/bend#1533](https://github.com/bendlang/bend/issues/1533)). `crash.bend` and programs without hairpin build natively.
+The webhook example does not build natively yet: `bend-kit-hairpin@0.5.1.0` imports two versions of `bend-kit-time`, and `-o` refuses two versions of one C effect ([bendlang/bend#1533](https://github.com/bendlang/bend/issues/1533)). `crash.bend` and programs without hairpin build natively.
 
 `bench/` times replay at `open`. See [bench/README.md](bench/README.md).
