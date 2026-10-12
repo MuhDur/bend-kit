@@ -2,12 +2,12 @@ import Base
 import ./http.bend as Http
 import ./admission.bend as Admission
 import ./completion.bend as Completion
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
-import 0x584fc27920487ceab242392391418d7f/json.bend as Json
-import bend-kit-http2@0.2.0.0/hpack.bend as Hpack
-import bend-kit-http2@0.2.0.0/http2.bend as H2
-import bend-kit-bytes@0.3.1.0/bytes.bend as HBytes
-import bend-kit-time@0.1.2.1/time.bend as Time
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-json@0.6.0.0/json.bend as Json
+import bend-kit-http2@0.3.0.0/hpack.bend as Hpack
+import bend-kit-http2@0.3.0.0/http2.bend as H2
+import bend-kit-bytes@0.3.2.0/bytes.bend as HBytes
+import bend-kit-time@0.2.0.0/time.bend as Time
 
 
 def show_req(req: Http.Req) -> IO(Unit):

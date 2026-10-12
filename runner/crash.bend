@@ -1,7 +1,6 @@
 # check.bend runs this as a child process: it completes job x, then dies inside job y's attempt.
 import Base
-# bend-kit-bytes@0.3.0.0
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import ./runner.bend as R
 

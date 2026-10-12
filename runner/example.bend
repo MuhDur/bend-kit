@@ -1,16 +1,15 @@
 # Durable webhook delivery: a runner job signs a Standard Webhooks POST and sends it through hairpin.
 # A receiver on 127.0.0.1 answers 503, then 200: the runner requeues the first delivery and then completes both.
 import Base
-# bend-kit-bytes@0.3.0.0, the version journal and webhooks both take.
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-webhooks@0.4.0.0/webhooks.bend as W
 import bend-kit-hairpin@0.4.0.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-http@0.32.0.0/http.bend as Http
-import bend-kit-http@0.32.0.0/admission.bend as Admission
-import bend-kit-http@0.32.0.0/completion.bend as Completion
-import bend-kit-time@0.1.2.1/time.bend as Time
-import bend-kit-files@0.1.1.1/files.bend as Files
+import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-http@0.33.0.0/admission.bend as Admission
+import bend-kit-http@0.33.0.0/completion.bend as Completion
+import bend-kit-time@0.2.0.0/time.bend as Time
+import bend-kit-files@0.2.0.0/files.bend as Files
 import ./runner.bend as R
 
 # ---- the job
