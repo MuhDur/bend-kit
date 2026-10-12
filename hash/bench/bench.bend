@@ -1,7 +1,7 @@
 # Hash benchmark: each hash over one fixed input (see README.md).
 import Base
 import ../../time/time.bend as Time
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import ../hash.bend as Hash
 
 # 2^24 - 3 bytes, byte i = i mod 251: every tail path runs.

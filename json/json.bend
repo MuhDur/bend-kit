@@ -1,6 +1,6 @@
 # JSON values, parsed and encoded as RFC 8259. Source: https://github.com/paymog/bend-kit/tree/main/json
 import Base
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 # JSON (RFC 8259) as UTF-8 in Bytes. Strings, numbers and object keys are
 # UTF-8 Bytes too. The shared parser keeps its own stack. parse.bytes preserves

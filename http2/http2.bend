@@ -1,6 +1,6 @@
 # RFC 9113 HTTP/2 client and frames, with RFC 7541 HPACK over packed Bytes.
 import Base
-import bend-kit-bytes@0.3.1.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import ./hpack.bend as Hpack
 
 type Frame is Type:

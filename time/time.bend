@@ -2,8 +2,7 @@
 import Base
 import bend-kit-int@0.2.0.0/int.bend as Int
 import bend-kit-fmt@0.1.0.0/fmt.bend as Fmt
-# bend-kit-bytes@0.3.0.0
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 # secs + nanos / 10^9 seconds, with nanos below 10^9: -0.5 s is Duration{-1, 500000000}.
 type Duration is Data:
