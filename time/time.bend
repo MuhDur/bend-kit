@@ -51,6 +51,25 @@ def Duration.to_ms(d: Duration) -> Int.I64:
     case Duration{s, n}:
       Int.I64.add(Int.I64.mul(s, i64(1000)), i64((n / 1000000 : U32)))
 
+def Duration.to_nat.of(m: Maybe<&2, Nat>, +per: Nat, +n: U32) -> Nat:
+  match m:
+    case None{}:
+      0n
+    case Some{s}:
+      (s * per + U32.to_nat(n) : Nat)
+
+# Whole milliseconds, rounded down; 0 when d is negative.
+def Duration.to_ms_nat(d: Duration) -> Nat:
+  match d:
+    case Duration{s, n}:
+      Duration.to_nat.of(Int.I64.to_nat(s), 1000n, (n / 1000000 : U32))
+
+# Whole microseconds, rounded down; 0 when d is negative.
+def Duration.to_us_nat(d: Duration) -> Nat:
+  match d:
+    case Duration{s, n}:
+      Duration.to_nat.of(Int.I64.to_nat(s), 1000000n, (n / 1000 : U32))
+
 def Duration.carry(c: Bool, s: Int.I64, +n: U32) -> Duration:
   match c:
     case True{}:
@@ -145,6 +164,18 @@ def mono() -> IO(Duration):
   do IO<Duration>:
     r : U32 & U32 & U32 <- mono.raw()
     return raw.dur(r)
+
+# Monotonic milliseconds. Pure cores that take a Nat `now` in ms take this.
+def mono.ms() -> IO(Nat):
+  do IO<Nat>:
+    d : Duration <- mono()
+    return Duration.to_ms_nat(d)
+
+# Monotonic microseconds.
+def mono.us() -> IO(Nat):
+  do IO<Nat>:
+    d : Duration <- mono()
+    return Duration.to_us_nat(d)
 
 # The wall clock. It can jump when the system time is set.
 def now() -> IO(Instant):

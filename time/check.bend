@@ -76,6 +76,20 @@ def read(r: Result<&1, &1, U32 & String, File>) -> IO(Unit):
 def show_now(+n: Time.Instant) -> IO(Unit):
   IO.print("now: " ++ show(Time.rfc3339(n)) ++ " / " ++ show(Time.http_date(n)))
 
+def dur(hi: U32, lo: U32, n: U32) -> Time.Duration:
+  Time.raw.dur((hi, lo, n))
+
+# Duration.to_us_nat and to_ms_nat round down, carry seconds past 2^32, and clamp negatives to 0.
+def nats() -> Bool:
+  Nat.is_eq(Time.Duration.to_us_nat(dur(0, 0, 999)), 0n) &&
+    Nat.is_eq(Time.Duration.to_us_nat(dur(0, 0, 1999)), 1n) &&
+    Nat.is_eq(Time.Duration.to_us_nat(dur(0, 1, 999999999)), 1999999n) &&
+    Nat.is_eq(Time.Duration.to_us_nat(dur(0, 4294, 967296000)), (4294967295n + 1n : Nat)) &&
+    Nat.is_eq(Time.Duration.to_us_nat(dur(0, 281474976, 710655000)), (65536n * 4294967295n + 65535n : Nat)) &&
+    Nat.is_eq(Time.Duration.to_ms_nat(dur(0, 2, 345999999)), 2345n) &&
+    Nat.is_eq(Time.Duration.to_ms_nat(dur(1, 0, 0)), (4294967295n * 1000n + 1000n : Nat)) &&
+    Nat.is_eq(Time.Duration.to_ms_nat(Time.Duration{Int.I64.neg(Int.I64.from_u32(1)), 999999999}), 0n)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     t0 : Time.Duration <- Time.mono()
@@ -84,6 +98,10 @@ def main() -> IO(Unit):
     IO.print("slept 20 ms, mono says " ++ Time.Duration.show_ms(Time.Duration.sub(t1, t0)))
     IO.print("show_ms of 2 s + 345 ns (want 2000.000345): " ++ Time.Duration.show_ms(Time.Duration{Int.I64.from_u32(2), 345}))
     IO.print("show_ms of -1 ns (want -0.000001): " ++ Time.Duration.show_ms(Time.Duration{Int.I64.neg(Int.I64.from_u32(1)), 999999999}))
+    IO.print("Duration to ms/us Nat conversions (want True): " ++ Bool.show(nats()))
+    m0 : Nat <- Time.mono.ms()
+    u0 : Nat <- Time.mono.us()
+    IO.print("mono.us / 1000 >= mono.ms (want True): " ++ Bool.show(Nat.is_ge(Nat.div(u0, 1000n), m0)))
     now : Time.Instant <- Time.now()
     show_now(now)
     IO.print("round-trip failures in 3653 days: " ++ U32.show(trips(3653n, Int.I64.neg(Int.I64.from_u32(719528)), Int.I64.from_u32(997), 0)))
