@@ -3,8 +3,8 @@
 AWS Signature V4, and an S3 client over `hairpin`.
 
 ```bend
-import bend-kit-sigv4@0.3.0.1/sigv4.bend as Sig
-import bend-kit-hairpin@0.3.0.0/hairpin.bend as Hairpin
+import bend-kit-sigv4@0.4.0.0/sigv4.bend as Sig
+import bend-kit-hairpin@0.4.0.0/hairpin.bend as Hairpin
 import bend-kit-http@0.32.0.0/http.bend as Http
 ```
 

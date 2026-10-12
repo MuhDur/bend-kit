@@ -1,7 +1,7 @@
 # OAuth 2.0 client credentials, refresh, and authorization code with PKCE over Hairpin. Source: https://github.com/paymog/bend-kit/tree/main/oauth2
 import Base
 import bend-kit-crypto@0.2.2.1/crypto.bend as Crypto
-import bend-kit-hairpin@0.3.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.4.0.0/hairpin.bend as Hairpin
 import bend-kit-http@0.32.0.0/http.bend as Http
 import bend-kit-time@0.1.2.1/time.bend as Time
 # By hash, as hairpin imports them: bend-kit-url@0.4.1.0, -json@0.5.0.1, -encoding@0.3.0.0, -bytes@0.3.0.0.
