@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `hairpin` 0.4.0.0: imports the retry policy from `bend-kit-retry@0.1.0.0`. Breaking: `bend-kit-hairpin@0.4.0.0/retry.bend` is gone; import `bend-kit-retry@0.1.0.0/retry.bend`, and `Retry` types come from that package. The retry laws and proofs moved there too.
 - `retry` 0.1.0.0: new package. Hairpin's retry policy (attempt budget, deadline, backoff, circuit breaker) and its proofs, with no HTTP imports.
 - `cache` 0.1.0.0: cache validity for keyed values. Fetches take per-key generations; a completion lands only at or above the key's floor, then raises it. Invalidation voids fetches in flight, eviction keeps generations, and entries expire by TTL or negative TTL from the fetch start. Proved over any sequence of operations on a key: no expired read, stale completions stay stale, an older fetch cannot overwrite a newer one, and eviction changes only the current entry.
 - `authz` 0.1.0.0: new package. Pure authorization policies with deny-overrides, default deny, intersection, and fail-closed missing context, with proved composition laws. `check.bend` guards a Camber route with it.
