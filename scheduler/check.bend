@@ -1,7 +1,6 @@
 import Base
 import ./queue.bend as Q
 import ./recurrence.bend as R
-import ./clock.bend as Clock
 
 def require(ok: Bool, message: String) -> IO(Unit):
   match ok:
@@ -175,14 +174,6 @@ def boundaries() -> Bool:
     picked(ticket(second), value(Nat, e1), 20n, 20) && absent(ticket(early)) &&
     picked(ticket(third), value(Nat, e2), wide, 30) && absent(ticket(empty))
 
-def clock() -> Bool:
-  Nat.is_eq(Clock.micros((0, 0, 999)), 0n) &&
-    Nat.is_eq(Clock.micros((0, 0, 1999)), 1n) &&
-    Nat.is_eq(Clock.micros((0, 1, 999999999)), 1999999n) &&
-    Nat.is_eq(Clock.micros((0, 4294, 967296000)), (4294967295n + 1n : Nat)) &&
-    Nat.is_eq(Clock.micros((0, 281474976, 710655000)),
-      (65536n * 4294967295n + 65535n : Nat))
-
 def same(xs: List<&2, Nat>, ys: List<&2, Nat>) -> Bool:
   match xs ys:
     case Nil{} Nil{}:
@@ -223,6 +214,5 @@ def main() -> IO(Unit):
     require(completion(), "running token completion/requeue failed")
     require(running(), "running operations lost tokens, reused IDs or changed FIFO order")
     require(boundaries(), "wide deadlines or decreasing supplied time failed")
-    require(clock(), "clock microsecond conversion failed")
     require(recurrence(), "recurrence policy or exact arithmetic failed")
-    IO.print("scheduler: order, cancellation, running tokens, recurrence, wide deadlines and clock conversion pass")
+    IO.print("scheduler: order, cancellation, running tokens, recurrence and wide deadlines pass")

@@ -2,6 +2,8 @@
 import Base
 import bend-kit-http@0.32.0.0/http.bend as Http
 import bend-kit-time@0.1.2.1/time.bend as Time
+# Http takes time 0.1.2.1 Instants; the monotonic Nat clock comes from 0.1.3.0.
+import bend-kit-time@0.1.3.0/time.bend as Clock
 # By hash, as http imports them: bend-kit-url@0.4.1.0, -json@0.5.0.1, -bytes@0.3.0.0.
 import 0x1f2d80f53f971b16c6de6a65cb1918ae/url.bend as Url
 import 0x584fc27920487ceab242392391418d7f/json.bend as Json
@@ -89,16 +91,6 @@ def close(c: Client) -> IO(Unit):
   Client{o, pool, j, br} = c
   Http.pool.close(pool)
 
-def ms.of(r: U32 & U32 & U32) -> Nat:
-  (hi, lo, ns) = r
-  Nat.add(Nat.mul(Nat.add(Nat.mul(U32.to_nat(hi), 1n+4294967295n), U32.to_nat(lo)), 1000n), U32.to_nat((ns / 1000000 : U32)))
-
-# Milliseconds on the monotonic clock that Retry budgets and breakers use.
-def now.ms() -> IO(Nat):
-  do IO<Nat>:
-    r : U32 & U32 & U32 <- Time.mono.raw()
-    return ms.of(r)
-
 def target.pick(none: Bool, b: String, ref: String) -> Maybe<&2, String>:
   match none:
     case True{}:
@@ -180,7 +172,7 @@ type Step is Type:
 def clock(need: Bool) -> IO(Nat):
   match need:
     case True{}:
-      now.ms()
+      Clock.mono.ms()
     case False{}:
       IO.pure(Nat, 0n)
 

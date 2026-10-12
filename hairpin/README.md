@@ -3,12 +3,13 @@
 Hairpin is an HTTP client for Bend 2, built on `bend-kit-http`. One `Client` holds a base URL, default headers, a socket pool, a cookie jar, a client certificate, a redirect mode, a step timeout, a retry policy, and a circuit breaker. Each request uses all of them. The model is undici's `Agent` with ky's instance options.
 
 ```bend
-import bend-kit-hairpin@0.4.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.5.0.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import bend-kit-http@0.32.0.0/http.bend as Http
+import bend-kit-time@0.1.3.0/time.bend as Clock
 ```
 
-Import `bend-kit-http@0.32.0.0` and `bend-kit-retry@0.1.0.0`. Those are the versions `hairpin.bend` imports, and another version has a different `Http.Res` or `Retry.Budget`.
+Import `bend-kit-http@0.32.0.0` and `bend-kit-retry@0.1.0.0`. Those are the versions `hairpin.bend` imports, and another version has a different `Http.Res` or `Retry.Budget`. `Clock` is only for `Clock.mono.ms()`; pass `Instant`s from `bend-kit-time@0.1.2.1`, the version Http takes.
 
 Hairpinning, or NAT loopback, is traffic that goes out and bends back. A request does the same.
 
@@ -65,7 +66,7 @@ Hairpin does not stream. For a streamed body, use `Http.open` and `Http.upload`.
 
 ## Retries
 
-[`bend-kit-retry`](../retry) is the policy. It is pure; Hairpin reads the clock (`Hairpin.now.ms()`, monotonic milliseconds) and calls it. Each request runs this loop:
+[`bend-kit-retry`](../retry) is the policy. It is pure; Hairpin reads the clock and calls it. Every `now` in the policy is monotonic milliseconds from `Clock.mono.ms()`. Each request runs this loop:
 
 1. **Admit.** `Retry.admit(breaker, budget, now)` checks the deadline, then the budget, then the breaker. Only `GateGo` starts an attempt, and it takes one attempt from the budget. A denial before the first attempt is `ErrDenied{why}`; a later denial returns the last result.
 2. **Classify.** `Http.retry.judge` reads the result. A connect error, a timeout, and 408, 429, 500, 502, 503, and 504 are transient. Anything else (a success, another status, another error) is `Settled`. A transient failure of GET, HEAD, OPTIONS, TRACE, PUT, or DELETE is `Transient`, with the server's `Retry-After` (at most 30 s). The same failure of any other method is `Unsafe`.
@@ -87,7 +88,7 @@ def call(x: Hairpin.Client & Retry.Budget) -> IO(Hairpin.Client & Retry.Budget &
 
 def start(c: Hairpin.Client) -> IO(Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Res>):
   do IO<Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Res>>:
-    now : Nat <- Hairpin.now.ms()
+    now : Nat <- Clock.mono.ms()
     call((c, Retry.Budget.new(4n, now, Some{2000n})))
 ```
 
@@ -113,7 +114,7 @@ A `Client` has one breaker for all origins. Requests on one client are sequentia
 
 [../retry/README.md](../retry/README.md#proven-claims) lists the proven claims of the policy. `LAWS.bend` here proves Hairpin's URL resolution, header merge, and outcome classification (`outcome_*`) on fixtures.
 
-The proofs cover the policy, not the IO loop in `hairpin.bend`. Hairpin calls `Retry.admit` before each attempt and `Retry.plan` after it; `check.bend` tests this against a server that counts attempts. A deadline does not cancel an attempt in flight; its connect, write, and read steps each time out after `Hairpin.timeout`. The monotonic clock (`Time.mono.raw`), the random jitter (`IO.random_u32`), the sleep, and the sockets are host code. `request` and `request.in` retry only the methods that RFC 9110 calls idempotent. With `request.as`, the caller's `idem` and `judge` decide, and Hairpin trusts them.
+The proofs cover the policy, not the IO loop in `hairpin.bend`. Hairpin calls `Retry.admit` before each attempt and `Retry.plan` after it; `check.bend` tests this against a server that counts attempts. A deadline does not cancel an attempt in flight; its connect, write, and read steps each time out after `Hairpin.timeout`. The monotonic clock (`Clock.mono.ms`), the random jitter (`IO.random_u32`), the sleep, and the sockets are host code. `request` and `request.in` retry only the methods that RFC 9110 calls idempotent. With `request.as`, the caller's `idem` and `judge` decide, and Hairpin trusts them.
 
 ## Checks
 

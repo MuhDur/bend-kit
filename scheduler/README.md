@@ -1,6 +1,6 @@
 # scheduler
 
-Pure deadline queues and recurrence planning. Import `bend-kit-scheduler@0.1.0.0/queue.bend` as `Queue` and `bend-kit-scheduler@0.1.0.0/recurrence.bend` as `Recurrence`. The hub entry imports these modules and the separate `clock.bend` adapter.
+Pure deadline queues and recurrence planning. Import `bend-kit-scheduler@0.2.0.0/queue.bend` as `Queue` and `bend-kit-scheduler@0.2.0.0/recurrence.bend` as `Recurrence`.
 
 ## Queue transitions
 
@@ -35,9 +35,9 @@ For a positive period, next is the first anchored deadline strictly after comple
 
 The core never reads a clock. `now` and deadlines must share epoch, units, and clock domain. Use a monotonic clock for elapsed-time scheduling: wall clocks may jump. Decreasing supplied time still cannot select a ticket before its supplied deadline, but elapsed-time meaning requires nondecreasing input.
 
-`clock.bend` adapts `time@0.1.2.1` raw monotonic words to milliseconds without narrowing to U32; benchmark timing uses microseconds. OS monotonic-clock correctness and effect code are trusted, not proved. No exact punctuality, fairness, eventual execution, crash durability, or distributed-scheduler claim is made.
+Every `now` and deadline in `live.bend` is monotonic milliseconds from `Time.mono.ms()` in `bend-kit-time@0.1.3.0`; the benchmark times itself with `Time.mono.us()`. Pass the same `Time.mono.ms()` reading to this queue and to other pure cores, such as Hairpin's retry policy, so their times share one unit. OS monotonic-clock correctness and effect code are trusted, not proved. No exact punctuality, fairness, eventual execution, crash durability, or distributed-scheduler claim is made.
 
-The proof model is exact mathematical Nat, with no modular arithmetic. **Bend 2.0.36 native Nat is checked and limited to `2^48 - 1`.** Unrepresentable inputs/intermediate arithmetic terminate with an explicit `bend: a Nat past the largest immediate 2^48-1` error; they do not wrap into an earlier deadline. This is a fatal runtime overflow report, not a recoverable Maybe result. Keep all intermediate values representable. The adapter uses microseconds instead of nanoseconds to avoid hitting this limit after a few days of uptime (microseconds allow about 8.9 years). Select a smaller origin/unit for longer-lived clock domains. Resource exhaustion is not covered by arithmetic proofs.
+The proof model is exact mathematical Nat, with no modular arithmetic. **Bend 2.0.36 native Nat is checked and limited to `2^48 - 1`.** Unrepresentable inputs/intermediate arithmetic terminate with an explicit `bend: a Nat past the largest immediate 2^48-1` error; they do not wrap into an earlier deadline. This is a fatal runtime overflow report, not a recoverable Maybe result. Keep all intermediate values representable. Milliseconds reach that limit after about 8900 years of uptime, microseconds after about 8.9 years. Select a smaller origin/unit for longer-lived clock domains. Resource exhaustion is not covered by arithmetic proofs.
 
 ## Proofs and checks
 
@@ -51,4 +51,4 @@ scripts/check.sh scheduler
 python3 scheduler/bench/run.py 3
 ```
 
-`check.bend` covers deterministic deadline/FIFO order, decreasing-time early polls, nontrivial pending cancellation with surviving tickets, simultaneous running-token completion/requeue/cancellation, fresh IDs, both recurrence policies, zero periods, deadlines beyond U32, and raw clock conversion through the native Nat ceiling. `live.bend` uses the real clock and `concurrency@0.2.0.0` worker pool, observes selection order and cancellation, demonstrates that already-running work finishes without resurrection, and requeues and selects a fixed-delay task again. It intentionally asserts no exact timing tolerance. [Benchmark results](bench/README.md).
+`check.bend` covers deterministic deadline/FIFO order, decreasing-time early polls, nontrivial pending cancellation with surviving tickets, simultaneous running-token completion/requeue/cancellation, fresh IDs, both recurrence policies, zero periods, and deadlines beyond U32. `time/check.bend` covers the clock conversion through the native Nat ceiling. `live.bend` uses the real clock and `concurrency@0.2.0.0` worker pool, observes selection order and cancellation, demonstrates that already-running work finishes without resurrection, and requeues and selects a fixed-delay task again. It intentionally asserts no exact timing tolerance. [Benchmark results](bench/README.md).

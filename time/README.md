@@ -16,4 +16,4 @@ import bend-kit-time@0.1.3.0/time.bend as Time
 
 `tzif.parse` reads a zone from packed bytes. This package imports bytes as `0x49814d83de8f70993a43e1002be29ecd/bytes.bend`. `Zone.local` applies the zone to an instant, including the POSIX footer for instants after the last explicit transition.
 
-`notch` imports an older time hash, `0x3bfb4ae4d3b87b90f01bfcd298211455`. `http@0.30.0.0` and `hairpin` import `bend-kit-time@0.1.0.0`. Pass an `Instant` only into the version that expects it.
+`notch` imports an older time hash, `0x3bfb4ae4d3b87b90f01bfcd298211455`. `http@0.32.0.0` imports `bend-kit-time@0.1.2.1`. Hairpin imports 0.1.2.1 for Http's `Instant`s and 0.1.3.0 for `mono.ms`. Pass an `Instant` only into the version that expects it.

@@ -1,8 +1,7 @@
 # A versioned configuration cache, run against the real clock with a delayed fetch.
 import Base
 import ./cache.bend as C
-import bend-kit-time@0.1.2.1/time.bend as Time
-import bend-kit-int@0.2.0.0/int.bend as Int
+import bend-kit-time@0.1.3.0/time.bend as Time
 
 # Values stay fresh for 1000 ms; a missing key is remembered for 400 ms.
 def POLICY() -> C.Policy:
@@ -14,12 +13,6 @@ def ok(good: Bool, +name: String) -> IO(Unit):
       IO.print("ok " ++ name)
     case False{}:
       IO.die(Unit, 1, "bad " ++ name)
-
-# Monotonic milliseconds.
-def clock() -> IO(Nat):
-  do IO<Nat>:
-    d : Time.Duration <- Time.mono()
-    return Maybe.default(&2, Nat, Int.I64.to_nat(Time.Duration.to_ms(d)), 0n)
 
 def shown(r: Maybe<&2, C.Entry<String>>) -> String:
   match r:
@@ -33,7 +26,7 @@ def shown(r: Maybe<&2, C.Entry<String>>) -> String:
 # Reads key at the current clock and checks the answer, version included.
 def expect(+c: C.Cache<String>, +key: String, +want: String, +name: String) -> IO(Unit):
   do IO<Unit>:
-    now : Nat <- clock()
+    now : Nat <- Time.mono.ms()
     +got : String = shown(C.Cache.read(~String, c, key, now))
     ok(String.eq(got, want), name ++ ": " ++ key ++ " is " ++ got)
 
@@ -83,7 +76,7 @@ def expiry(+c: C.Cache<String>) -> IO(Unit):
     expect(c, "flags", "v4 dark=auto", "an entry stays until its ttl")
     IO.sleep(600)
     expect(c, "flags", "none", "an entry expires after its ttl")
-    +now : Nat <- clock()
+    +now : Nat <- Time.mono.ms()
     +d : C.Cache<String> = fetch(fetch(c, "flags", now, C.Found{4n, "dark=auto"}), "limits", now, C.Found{1n, "rps=100"})
     evicted(C.Cache.start(~String, d, "flags", now), now)
 
@@ -99,7 +92,7 @@ def race(p: C.Ticket & C.Cache<String>, +now: Nat) -> C.Cache<String>:
 def raced(+c: C.Cache<String>) -> IO(Unit):
   do IO<Unit>:
     expect(c, "flags", "v3 dark=auto", "an older completion does not overwrite a newer one")
-    +now : Nat <- clock()
+    +now : Nat <- Time.mono.ms()
     +d : C.Cache<String> = fetch(C.Cache.invalidate(~String, c, "flags"), "flags", now, C.Found{4n, "dark=auto"})
     expiry(fetch(d, "beta", now, C.Missing{}))
 
@@ -112,7 +105,7 @@ def delayed(ta: C.Ticket, chan: Chan(C.Found<String>), p: C.Ticket & C.Cache<Str
         r : C.Found<String> <- IO.join(C.Found<String>, chan)
         +e : C.Cache<String> = C.Cache.complete(~String, d, ta, r)
         expect(e, "flags", "v2 dark=on", "a delayed fetch from before the invalidation is dropped")
-        +now : Nat <- clock()
+        +now : Nat <- Time.mono.ms()
         raced(race(C.Cache.start(~String, e, "flags", now), now))
 
 # Fetch A starts while upstream holds v1. Upstream moves to v2 and the key is
@@ -124,12 +117,12 @@ def started(p: C.Ticket & C.Cache<String>) -> IO(Unit):
         chan : Chan(C.Found<String>) <- IO.fork(C.Found<String>, fetch.slow(150, C.Found{1n, "dark=off"}))
         +d : C.Cache<String> = C.Cache.invalidate(~String, c, "flags")
         expect(d, "flags", "none", "an invalidated key serves nothing")
-        now : Nat <- clock()
+        now : Nat <- Time.mono.ms()
         delayed(ta, chan, C.Cache.start(~String, d, "flags", now))
 
 def main() -> IO(Unit):
   do IO<Unit>:
     +c : C.Cache<String> = C.Cache.new(String, POLICY())
     expect(c, "flags", "none", "a new cache serves nothing")
-    now : Nat <- clock()
+    now : Nat <- Time.mono.ms()
     started(C.Cache.start(~String, c, "flags", now))
