@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `runner` 0.1.0.0: new package. A durable job runner from `journal`, `scheduler`, `resources`, and `retry`. Each queue transition is one fsync'd journal record, and `open` replays them, then requeues the tickets that a crash left running. A `resources` pool bounds the attempts that run at once; failed attempts requeue at retry's wait, and a breaker per target defers new attempts while it is open. Proved: replay of any committed prefix equals the live state, a completed or cancelled ticket is never selected again (after recovery too), each attempt holds one pool unit and gives it back once, and a requeue waits retry's wait. `example.bend` is a webhook outbox through `webhooks` and `hairpin`.
 - `llm` 0.5.0.0: `stream` opens through `Hairpin.open.as`, so a stream open shares the retry budget, backoff, and circuit breaker that `send` uses. Its own retry loop is gone. Breaking: imports `hairpin` 0.5.1.0, so `Hairpin` types come from that version, and a denied stream open is `ErrNet{ErrDenied{...}}`.
 - `hairpin` 0.5.1.0: `open.as` opens a streamed response under the same budget, deadline, backoff, and circuit breaker as `request.as`. A refused stream closes when the next attempt is admitted; the last one comes back open.
 - `hairpin` 0.5.0.0: reads the monotonic clock with `Time.mono.ms` from `bend-kit-time@0.1.3.0`. Breaking: `Hairpin.now.ms` is gone; call `Time.mono.ms()` from that version. `Http` `Instant`s still come from `time` 0.1.2.1.

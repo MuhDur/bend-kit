@@ -145,6 +145,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`scheduler`](scheduler) | `bend-kit-scheduler@0.2.0.0/queue.bend` | Pure stable deadline queues, cancellation tokens, and bounded recurrence planning. |
 | [`resources`](resources) | `bend-kit-resources@0.1.0.0/resources.bend` | Bounded capacity pools with affine reservations: reserve, release, split, and combine. |
 | [`journal`](journal) | `bend-kit-journal@0.1.0.0/journal.bend` | An append-only journal: checksummed frames, fsync'd appends, and proven crash recovery of the committed prefix. |
+| [`runner`](runner) | `bend-kit-runner@0.1.0.0/runner.bend` | A durable job runner: a journaled queue, a bounded pool, retry, and a breaker per target, with proven replay. |
 | [`cache`](cache) | `bend-kit-cache@0.1.0.0/cache.bend` | Cache validity: expiry, negative results, invalidation, and generation-safe fetch completion. |
 | [`notch`](notch) | `bend-kit-notch@0.1.0.1/notch.bend` | Leveled logfmt or JSON-lines logging. |
 | [`tty`](tty) | `bend-kit-tty@0.1.0.1/tty.bend` | Terminal size, color, and display width. |
