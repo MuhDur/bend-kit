@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `llm` 0.5.0.0: `stream` opens through `Hairpin.open.as`, so a stream open shares the retry budget, backoff, and circuit breaker that `send` uses. Its own retry loop is gone. Breaking: imports `hairpin` 0.5.1.0, so `Hairpin` types come from that version, and a denied stream open is `ErrNet{ErrDenied{...}}`.
 - `hairpin` 0.5.1.0: `open.as` opens a streamed response under the same budget, deadline, backoff, and circuit breaker as `request.as`. A refused stream closes when the next attempt is admitted; the last one comes back open.
 - `hairpin` 0.5.0.0: reads the monotonic clock with `Time.mono.ms` from `bend-kit-time@0.1.3.0`. Breaking: `Hairpin.now.ms` is gone; call `Time.mono.ms()` from that version. `Http` `Instant`s still come from `time` 0.1.2.1.
 - `scheduler` 0.2.0.0: `live.bend` and the benchmark read `Time.mono.ms` and `Time.mono.us` from `bend-kit-time@0.1.3.0`. Breaking: `clock.bend` (`Clock.now`, `Clock.now_us`, `Clock.micros`) is gone.
