@@ -159,7 +159,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`sqlite`](sqlite) | `bend-kit-sqlite@0.1.0.1/sqlite.bend` | Prepared statements through libsqlite3. |
 | [`postgres`](postgres) | `bend-kit-postgres@0.1.0.2/postgres.bend` | Postgres protocol 3.0, SCRAM-SHA-256, and a pool. |
 | [`redis`](redis) | `bend-kit-redis@0.1.0.2/redis.bend` | Redis and Valkey over RESP3, with pipelining and a pool. |
-| [`llm`](llm) | `bend-kit-llm@0.4.0.0/llm.bend` | Anthropic Messages and OpenAI Chat Completions, including SSE. |
+| [`llm`](llm) | `bend-kit-llm@0.5.0.0/llm.bend` | Anthropic Messages and OpenAI Chat Completions, including SSE. |
 
 ### Applications
 

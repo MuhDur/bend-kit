@@ -1,7 +1,7 @@
 # LLM client for the Anthropic Messages and OpenAI Chat Completions APIs, with SSE streaming. Source: https://github.com/paymog/bend-kit/tree/main/llm
 import Base
 import ./sse.bend as Sse
-import bend-kit-hairpin@0.4.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.5.1.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import bend-kit-http@0.32.0.0/http.bend as Http
 # By hash, as http imports them: bend-kit-json@0.5.0.1, -bytes@0.3.0.0, -encoding@0.3.0.0.
@@ -424,43 +424,6 @@ def open.judge(r: Result<&1, &1, Http.Err, Http.Stream>) -> Result<&1, &1, Http.
     case Done{st}:
       open.res(Http.stream.res(st))
 
-def open.kept(body: Bytes.Bytes, j: Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>) -> Bytes.Bytes & Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>:
-  (r, m) = j
-  (body, r, m)
-
-def open.once(+url: String, +headers: Map<&2, List<&2, String>>, +ms: U32, r: Bytes.Bytes & Bytes.Bytes) ->
-    IO(Bytes.Bytes & Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>):
-  (body, spare) = r
-  do IO<Bytes.Bytes & Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>>:
-    s : Result<&1, &1, Http.Err, Http.Stream> <- Http.open.with("POST", url, headers, spare, ms)
-    return open.kept(body, open.judge(s))
-
-def open.drop(r: Result<&1, &1, Http.Err, Http.Stream>) -> IO(Unit):
-  match r:
-    case Fail{e}:
-      IO.pure(Unit, Unit{})
-    case Done{st}:
-      Http.stream.close(st)
-
-# A refused stream closes before the next try.
-def open.go(left: Nat, +n: Nat, +url: String, +headers: Map<&2, List<&2, String>>, +ms: U32,
-    t: Bytes.Bytes & Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>) -> IO(Result<&1, &1, Http.Err, Http.Stream>):
-  match left:
-    case 0n:
-      (body, r, m) = t
-      IO.pure(Result<&1, &1, Http.Err, Http.Stream>, r)
-    case 1n+rest:
-      (body, r, m) = t
-      match m:
-        case None{}:
-          IO.pure(Result<&1, &1, Http.Err, Http.Stream>, r)
-        case Some{v}:
-          do IO<Result<&1, &1, Http.Err, Http.Stream>>:
-            open.drop(r)
-            Http.retry.sleep(v, n)
-            tried : Bytes.Bytes & Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String> <- open.once(url, headers, ms, Bytes.slice(body, 0, 4294967295))
-            open.go(rest, 1n+n, url, headers, ms, tried)
-
 # A refused stream's error body, at most f more pieces, then the stream closed.
 def drain(f: Nat, x: Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>, acc: Bytes.Bytes) -> IO(Bytes.Bytes):
   match f:
@@ -505,10 +468,10 @@ def start.res(x: Http.Stream & Http.Res) -> IO(Result<&1, &1, Err, Http.Stream>)
   Http.Res{+status, hd, b} = res
   start.ok(ok(status), status, h)
 
-def start(r: Result<&1, &1, Http.Err, Http.Stream>) -> IO(Result<&1, &1, Err, Http.Stream>):
+def start(r: Result<&1, &1, Hairpin.Err, Http.Stream>) -> IO(Result<&1, &1, Err, Http.Stream>):
   match r:
     case Fail{e}:
-      IO.pure(Result<&1, &1, Err, Http.Stream>, Fail{ErrNet{Hairpin.ErrHttp{e}}})
+      IO.pure(Result<&1, &1, Err, Http.Stream>, Fail{ErrNet{e}})
     case Done{h}:
       start.res(Http.stream.res(h))
 
@@ -519,14 +482,28 @@ def stream.of(r: Result<&1, &1, Err, Http.Stream>, +api: Api) -> Result<&1, &1, 
     case Done{h}:
       Done{Stream{api, h, Sse.reader()}}
 
-# Any request body that asks for SSE, as for tools. A stream opens its own connection, outside the pool.
+def stream.done(+api: Api, base: String, headers: Map<&2, List<&2, String>>, +ms: U32, +n: U32,
+    x: Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream>) -> IO(Client & Result<&1, &1, Err, Stream>):
+  (h, b, r) = x
+  do IO<Client & Result<&1, &1, Err, Stream>>:
+    s : Result<&1, &1, Err, Http.Stream> <- start(r)
+    return (Client{api, base, headers, ms, n, h}, stream.of(s, api))
+
+def open.budget(+api: Api, +base: String, +headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, y: Hairpin.Client & Retry.Budget) ->
+    IO(Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream>):
+  (h, b) = y
+  do IO<Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream>>:
+    enc : String <- Http.codings()
+    Hairpin.open.as(~open.judge, h, b, True{}, enc, "POST", url(api, base), headers, body)
+
+# Any request body that asks for SSE, as for tools. The open retries as call does, on a budget of n + 1.
+# A stream opens its own connection, outside the pool.
 def stream.raw(c: Client, v: Json.Val) -> IO(Client & Result<&1, &1, Err, Stream>):
   Client{+api, +base, +headers, +ms, +n, h} = c
   do IO<Client & Result<&1, &1, Err, Stream>>:
-    first : Bytes.Bytes & Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String> <- open.once(url(api, base), headers, ms, Bytes.slice(Json.encode.bytes(v), 0, 4294967295))
-    r : Result<&1, &1, Http.Err, Http.Stream> <- open.go(U32.to_nat(n), 0n, url(api, base), headers, ms, first)
-    s : Result<&1, &1, Err, Http.Stream> <- start(r)
-    return (Client{api, base, headers, ms, n, h}, stream.of(s, api))
+    y : Hairpin.Client & Retry.Budget <- Hairpin.budget(Hairpin.retry(h, n))
+    x : Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream> <- open.budget(api, base, headers, Json.encode.bytes(v), y)
+    stream.done(api, base, headers, ms, n, x)
 
 # The reply as it is written: read it with next.
 def stream(c: Client, req: Req) -> IO(Client & Result<&1, &1, Err, Stream>):

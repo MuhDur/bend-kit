@@ -80,18 +80,35 @@ def wrap(op: IO(Http.Res)) -> IO(Http.Reply):
     res : Http.Res <- op
     return Http.Reply{res, Completion.Unobserved{}}
 
-# Two 529s, then a 200; then stop listening, so an extra attempt finds no listener.
-def serve(l: Listener) -> IO(Unit):
+def serve.one(fine: Bool, +inbox: Chan(Admission.Command), a: Listener & Result<&1, &1, U32 & String, Socket>) -> IO(Listener):
+  match fine:
+    case True{}:
+      Http.conn(~(req => wrap(s.fine(req))), ~Completion.ignore, Http.limits(1048576n), inbox, a)
+    case False{}:
+      Http.conn(~(req => wrap(s.overloaded(req))), ~Completion.ignore, Http.limits(1048576n), inbox, a)
+
+def serve.go(ks: List<&2, Bool>, +inbox: Chan(Admission.Command), l: Listener) -> IO(Unit):
+  match ks:
+    case Nil{}:
+      do IO<Unit>:
+        Listener.close(l)
+        Admission.close(inbox)
+    case Con{k, rest}:
+      do IO<Unit>:
+        a : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
+        l2 : Listener <- serve.one(k, inbox, a)
+        serve.go(rest, inbox, l2)
+
+# One connection per script entry: a 200 for True, a 529 for False. Then stop listening, so an extra attempt finds no listener.
+def serve(ks: List<&2, Bool>, l: Listener) -> IO(Unit):
   do IO<Unit>:
     +inbox : Chan(Admission.Command) <- Admission.open(Admission.Caps{128, 128, 128})
-    a : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
-    l1 : Listener <- Http.conn(~(req => wrap(s.overloaded(req))), ~Completion.ignore, Http.limits(1048576n), inbox, a)
-    b : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l1)
-    l2 : Listener <- Http.conn(~(req => wrap(s.overloaded(req))), ~Completion.ignore, Http.limits(1048576n), inbox, b)
-    c : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l2)
-    l3 : Listener <- Http.conn(~(req => wrap(s.fine(req))), ~Completion.ignore, Http.limits(1048576n), inbox, c)
-    Listener.close(l3)
-    Admission.close(inbox)
+    serve.go(ks, inbox, l)
+
+def listen(+port: U32, ks: List<&2, Bool>) -> IO(Chan(Unit)):
+  do IO<Chan(Unit)>:
+    l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", port))
+    IO.fork(Unit, serve(ks, l))
 
 def got.r(r: Result<&1, &1, Llm.Err, Json.Val>) -> IO(Unit):
   match r:
@@ -106,22 +123,76 @@ def got(x: Llm.Client & Result<&1, &1, Llm.Err, Json.Val>) -> IO(Unit):
     Llm.close(c)
     got.r(r)
 
-def served(m: Maybe<&1, Unit>) -> IO(Unit):
+def served(+n: String, m: Maybe<&1, Unit>) -> IO(Unit):
   match m:
     case None{}:
       IO.die(Unit, 1, "fail the server still waits for an attempt")
     case Some{u}:
-      IO.print("ok 3 attempts arrived, and no more")
+      IO.print("ok " ++ n ++ " attempts arrived, and no more")
 
 # The POST retries as llm judges, through Hairpin: 529 is not one of Hairpin's own retry statuses.
 def overloaded() -> IO(Unit):
   do IO<Unit>:
-    l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47853))
-    ch : Chan(Unit) <- IO.fork(Unit, serve(l))
+    ch : Chan(Unit) <- listen(47853, [False{}, False{}, True{}])
     x : Llm.Client & Result<&1, &1, Llm.Err, Json.Val> <- Llm.send.raw(Llm.base(Llm.anthropic("k"), "http://127.0.0.1:47853"), Json.Flag{True{}})
     got(x)
     m : Maybe<&1, Unit> <- IO.within(Unit, 3000, IO.join(Unit, ch))
-    served(m)
+    served("3", m)
+
+def opened.r(r: Result<&1, &1, Llm.Err, Llm.Stream>) -> IO(Unit):
+  match r:
+    case Fail{e}:
+      IO.die(Unit, 1, "fail the stream open did not retry two 529s to the 200")
+    case Done{s}:
+      do IO<Unit>:
+        Llm.stream.close(s)
+        IO.print("ok a stream open retried two 529s to a 200 within 2 retries")
+
+def opened(x: Llm.Client & Result<&1, &1, Llm.Err, Llm.Stream>) -> IO(Unit):
+  (c, r) = x
+  do IO<Unit>:
+    Llm.close(c)
+    opened.r(r)
+
+def refused.api(good: Bool, +status: U32, +body: String) -> IO(Unit):
+  match good:
+    case True{}:
+      IO.print("ok the budget spent, the last 529 comes back with its body")
+    case False{}:
+      IO.die(Unit, 1, "fail the stream ended with " ++ U32.show(status) ++ " " ++ body)
+
+def refused.r(r: Result<&1, &1, Llm.Err, Llm.Stream>) -> IO(Unit):
+  match r:
+    case Fail{Llm.ErrApi{+status, +body}}:
+      refused.api(Bool.and(U32.is_eq(status, 529), String.eq(body, "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}")), status, body)
+    case Fail{Llm.ErrNet{e}}:
+      IO.die(Unit, 1, "fail the stream ended with a network error")
+    case Fail{Llm.ErrReply{b}}:
+      IO.die(Unit, 1, "fail the stream ended with a bad reply")
+    case Done{s}:
+      do IO<Unit>:
+        Llm.stream.close(s)
+        IO.die(Unit, 1, "fail a 529 stream opened")
+
+def refused(x: Llm.Client & Result<&1, &1, Llm.Err, Llm.Stream>) -> IO(Unit):
+  (c, r) = x
+  do IO<Unit>:
+    Llm.close(c)
+    refused.r(r)
+
+# A stream open retries a 529 through Hairpin as call does. One retry is a budget of 2: the second 529 is the answer.
+def overloaded.stream() -> IO(Unit):
+  do IO<Unit>:
+    ch : Chan(Unit) <- listen(47854, [False{}, False{}, True{}])
+    x : Llm.Client & Result<&1, &1, Llm.Err, Llm.Stream> <- Llm.stream.raw(Llm.base(Llm.anthropic("k"), "http://127.0.0.1:47854"), Json.Flag{True{}})
+    opened(x)
+    m : Maybe<&1, Unit> <- IO.within(Unit, 3000, IO.join(Unit, ch))
+    served("3", m)
+    ch2 : Chan(Unit) <- listen(47855, [False{}, False{}])
+    y : Llm.Client & Result<&1, &1, Llm.Err, Llm.Stream> <- Llm.stream.raw(Llm.retry(Llm.base(Llm.anthropic("k"), "http://127.0.0.1:47855"), 1), Json.Flag{True{}})
+    refused(y)
+    m2 : Maybe<&1, Unit> <- IO.within(Unit, 3000, IO.join(Unit, ch2))
+    served("2", m2)
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -129,3 +200,4 @@ def main() -> IO(Unit):
     verdict("20000 events in 65536-byte reads", chunks(many(20000), 65536), 20000, 88890)
     verdict("1 MiB data line in 65536-byte reads", chunks(big(1048576), 65536), 1, 1048576)
     overloaded()
+    overloaded.stream()
