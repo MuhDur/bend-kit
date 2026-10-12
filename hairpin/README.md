@@ -3,7 +3,7 @@
 Hairpin is an HTTP client for Bend 2, built on `bend-kit-http`. One `Client` holds a base URL, default headers, a socket pool, a cookie jar, a client certificate, a redirect mode, a step timeout, a retry policy, and a circuit breaker. Each request uses all of them. The model is undici's `Agent` with ky's instance options.
 
 ```bend
-import bend-kit-hairpin@0.5.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.5.1.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import bend-kit-http@0.32.0.0/http.bend as Http
 import bend-kit-time@0.1.3.0/time.bend as Clock
@@ -58,11 +58,12 @@ The result is `Result<&1, &1, Hairpin.Err, Http.Res>`. `ErrHttp{e}` is the `Http
 - `Hairpin.post.json(c, url, v)` POSTs a `Json.Val` as compact JSON, with `content-type: application/json`.
 - `Hairpin.request.in(c, budget, method, url, headers, body)` makes one request inside a caller's retry layer. See [Nested retries](#nested-retries).
 - `Hairpin.request.as(~judge, c, budget, idem, enc, method, url, headers, body)` is `request.in` with every choice explicit. See [Your own retry rules](#your-own-retry-rules).
+- `Hairpin.open.as(~judge, c, budget, idem, enc, method, url, headers, body)` is `request.as` for a streamed response. See [Streams](#streams).
 - `Hairpin.budget(c)` gives the budget that one plain `request` gets: the client's `retry` + 1 attempts and its `deadline` from now.
 
 Everything else is `Http.fetch`: IPv6, DNS order, proxies from `http_proxy`, `https_proxy`, and `no_proxy`, HTTP/2 over ALPN, and body decoding of `gzip`, `deflate`, `br`, and `zstd`. See [../http/README.md](../http/README.md).
 
-Hairpin does not stream. For a streamed body, use `Http.open` and `Http.upload`. For many requests at once, use `Http.fetch.all`.
+For a streamed response under the retry policy, use `open.as`. For a streamed upload, use `Http.upload`. For many requests at once, use `Http.fetch.all`.
 
 ## Retries
 
@@ -104,6 +105,14 @@ Every attempt of every call takes from the one budget and obeys its deadline. Th
 
 The budget, the deadline, the backoff, and the breaker apply as for `request.in`.
 
+## Streams
+
+`open.as` takes the same arguments as `request.as` and returns an open `Http.Stream`. The budget, the deadline, the backoff, and the breaker apply as for `request.as`.
+
+- `~judge` takes the result of one open. Read the status and headers with `Http.stream.res`, and give the stream back in the result.
+- A refused stream closes when the next attempt is admitted. When no attempt follows, the last stream comes back open, so you can read its error body. Close every stream that comes back.
+- A stream opens its own connection, outside the pool, and follows redirects. The jar, the certificate, and the redirect mode do not apply.
+
 ## Circuit breaker
 
 `Retry.Circuit{threshold, window, cooldown, probes}` sets the breaker. [../retry/README.md](../retry/README.md#circuit-breaker) gives its states.
@@ -118,4 +127,4 @@ The proofs cover the policy, not the IO loop in `hairpin.bend`. Hairpin calls `R
 
 ## Checks
 
-`check.bend` runs a local server that accepts exactly one connection per scripted response and then stops listening, so each scenario counts its attempts: a missing attempt times out, and an extra one finds no listener. It checks a redirect that sets a cookie, a 503 retried to a 200, a POST 503 tried once, a 302 in manual mode, 3 attempts for `retry 2`, one attempt for a 404, a deadline that stops after 2 of 6 attempts and one that denies the first, a breaker that opens after 2 failures, denies, and closes after one probe, three nested calls that share a budget of 4: 3 attempts, then 1, then none, and a `request.as` judge that retries an idempotent POST through two 404s.
+`check.bend` runs a local server that accepts exactly one connection per scripted response and then stops listening, so each scenario counts its attempts: a missing attempt times out, and an extra one finds no listener. It checks a redirect that sets a cookie, a 503 retried to a 200, a POST 503 tried once, a 302 in manual mode, 3 attempts for `retry 2`, one attempt for a 404, a deadline that stops after 2 of 6 attempts and one that denies the first, a breaker that opens after 2 failures, denies, and closes after one probe, three nested calls that share a budget of 4: 3 attempts, then 1, then none, a `request.as` judge that retries an idempotent POST through two 404s, and an `open.as` stream that opens on the third attempt after two 503s.
