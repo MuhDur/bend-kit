@@ -14,6 +14,7 @@ Pure deadline queues and recurrence planning. Import `bend-kit-scheduler@0.2.0.0
 | `complete(A, id, state)` | State & Maybe Ticket | Consume a running token once. Missing/cancelled/completed tokens return None. |
 | `requeue(~A, id, deadline, state)` | State & Bool | Move an existing running token back to pending, retaining its ID. False if absent. |
 | `cancel(~A, id, state)` | State | Remove that ID from pending and running; an unknown ID is a no-op. |
+| `running(A, state)` | `List<&2, Ticket<A>>` | Read the tickets that have running tokens. |
 
 A ticket is `Ticket{id, deadline, payload}`. Ordering is ascending `(deadline, id)`: equal deadlines retain original enqueue order, including after requeue. Selection uses `deadline <= now`; an early poll returns None without removing anything. A selected ticket is not pending again unless successfully requeued. For one-shot work, complete it after execution.
 

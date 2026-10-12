@@ -1,6 +1,6 @@
 # Wire
 
-Byte-exact TCP, UDP, and TLS. A socket or listener is used once. The call returns it beside the result, except `connect`, which returns the socket inside the `Result`.
+Byte-exact TCP, UDP, and TLS. Calls consume a socket or listener and return it beside the result. `connect` returns a new socket inside the `Result`. `tls.close` consumes the socket and does not return it.
 
 ```bend
 import bend-kit-wire@0.4.6.1/wire.bend as Wire
@@ -10,7 +10,11 @@ import bend-kit-wire@0.4.6.1/wire.bend as Wire
 
 `tls.connect` checks the certificate chain and the host name. `tls.connect.cert` adds a PEM client chain and key. `tls.connect.ca` trusts the PEM certificates in one file for that handshake, instead of the default verify paths. Verification stays on. `tls.connect.alpn` returns the selected protocol. `tls.connect.alpn.ca` does both. Set `BEND_LIBSSL` when OpenSSL 3 `libssl` is not on the default path. Proofs do not cover `effs/wire.c` and `effs/wire.js`.
 
-`http` imports `bend-kit-wire@0.4.6.0`. `dns`, `stream`, `websocket`, `redis`, and `postgres` import `0.4.6.1`. A `Socket` from one version is not a `Socket` from another.
+`http`, `dns`, `stream`, `websocket`, `redis`, and `postgres` import `bend-kit-wire@0.4.6.1`. `Socket` and `Listener` come from Base, not from this package.
+
+| Def | Result | Use |
+|---|---|---|
+| `tls.close(sock: Socket)` | `IO(Unit)` | End the TLS session and close the socket. |
 
 
 ## Deadline-bounded listener acceptance

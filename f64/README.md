@@ -15,3 +15,7 @@ def main() -> IO(Unit):
 Base has no `F64`. This is a pure soft-float, so pure code can add two doubles. It is slow. A `NaN` operand becomes one quiet `NaN`. Payloads are not kept. Rounding is ties to even. `+0` and `-0` compare equal.
 
 `F64.hi` and `F64.lo` are the IEEE bits. `from_u32` is exact. Decimal text is not here. Square root and the transcendental functions are not here.
+
+| def | returns |
+|---|---|
+| `F64.is_nan(a: F64) -> Bool` | `True{}` for any NaN bit pattern. |

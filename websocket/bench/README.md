@@ -4,6 +4,8 @@ This times two hot paths in Bend, Rust, JavaScript (Node), and Python: **frame**
 
 ## Run
 
+Run from `websocket/bench`.
+
 ```sh
 python3 run.py      # 3 runs per variant, median
 python3 run.py 5    # 5 runs
@@ -15,7 +17,7 @@ You need `bend`, `cargo`, `bun`, `node`, and `python3`. `run.py` installs `ws@8.
 
 **frame**: a 65,536-byte payload, byte `i` = `(7 * i) & 255`, made before the timer starts. Each of **256** rounds masks it with the fixed key `37 fa 21 3d`, encodes one final binary frame (a 14-byte header with the 64-bit length), then parses that frame as a server would and unmasks the payload. 16 MiB go each way.
 
-- **Bend**: `WS.encode(Frame{True, 2, payload}, Some{key})`, then `WS.parse(True, 1 MiB, Bytes.Cursor.new(wire))`. Bytes are affine, so each round slices a fresh copy of the payload.
+- **Bend**: `WS.encode(WS.Frame{True{}, 2, payload}, Some{key})`, then `WS.parse(True{}, 1048576, Bytes.Cursor.new(wire))`. Bytes are affine, so each round slices a fresh copy of the payload.
 - **Rust**: `tungstenite` 0.29, `Frame::message` with `header_mut().mask` set, `Frame::format`, then `FrameSocket::read`. `FrameSocket` keeps the mask and the crate's `apply_mask` is private, so the parsed frame is formatted once more, which XORs the mask back off.
 - **Node**: `ws` 8.22 `Sender.frame` with a fixed `generateMask`, then a server `Receiver`. Bun replaces `ws` with its own module, which has no `Receiver`, so JavaScript runs on Node only.
 - **Python**: `websockets` 17.1 `Frame.serialize(mask=True)` with `secrets.token_bytes` pinned to the key, then `Frame.parse(mask=True)` on a `StreamReader`.

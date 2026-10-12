@@ -24,6 +24,10 @@ The defs are pure. The caller reads the clock, makes the attempts, sleeps, and c
 | `Retry.Circuit{threshold, window, cooldown, probes}` | The breaker settings. See [Circuit breaker](#circuit-breaker). |
 | `Retry.Breaker.new(circuit)` | A closed breaker. `Retry.BreakerOff{}` admits every attempt. |
 
+| def | result |
+|---|---|
+| `Retry.delay(n: Nat, base: Nat, cap: Nat)` | `Nat`; the backoff before jitter, bounded by `cap`. |
+
 ## Nested retries
 
 A layer with its own retry loop above another one multiplies attempts: 3 outer tries of 3 inner attempts are 9. Make one `Retry.Budget` for the whole operation, pass it to each layer, and pass the budget that comes back to the next call. Every attempt then takes from the one budget and obeys its deadline. `Retry.Budget` is a plain value, so a layer can build a fresh one. Do not: a layer that builds its own budget resets the count.

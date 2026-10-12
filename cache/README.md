@@ -58,7 +58,7 @@ Each key has a `Slot{next, floor, entry}`.
 - **Generations.** `start` gives each fetch of a key the generation `next`, then raises `next`. The `Ticket` holds the key, the generation, and the clock at the start. It is affine, so a fetch completes at most once.
 - **Completion.** `complete` stores a result only when `floor <= gen < next`. It then sets `floor` to `gen + 1`, so a fetch that started earlier can never land after it. Otherwise the cache does not change.
 - **Expiry.** A `Found{version, value}` becomes `Hit{version, value, at + ttl}`, and `Missing` becomes `Miss{at + negative_ttl}`, where `at` is the clock when the fetch started. Age counts from the start, so time spent fetching counts against freshness.
-- **Fresh reads.** `read(c, key, now)` serves an entry only while `now < expires`. Otherwise it answers `None`, and the caller must fetch.
+- **Fresh reads.** `Cache.read(~V, c, key, now)` serves an entry only while `now < expires`. Otherwise it answers `None`, and the caller must fetch.
 - **Invalidation.** `invalidate` drops the entry and sets `floor` to `next`. Every fetch already started for that key becomes stale.
 - **Eviction.** `evict` drops the entry and keeps `next` and `floor`. Eviction keeps one slot (two `Nat`s) for every key the cache has seen. That is what keeps a stale fetch stale after its key is evicted.
 
@@ -72,6 +72,7 @@ Each key has a `Slot{next, floor, entry}`.
 | `Cache.complete(~V, c, ticket, found)` | Stores what the fetch found, unless its ticket is stale. |
 | `Cache.invalidate(~V, c, key)` | Drops the entry and voids the fetches in flight. |
 | `Cache.evict(~V, c, key)` | Drops the entry. Fetches in flight still land; stale ones stay stale. |
+| `Entry.expires(V, e) -> Nat` | The expiry clock value of a `Hit` or `Miss`. |
 
 The `Slot.*` defs are the same operations on one key, and they are what the laws cover.
 
@@ -85,7 +86,7 @@ The `Slot.*` defs are the same operations on one key, and they are what the laws
 | `read_serves`, `read_expired` | An entry is served exactly while `now < expires`. |
 | `new_valid`, `run_valid` | Every reachable slot has `floor <= next`. |
 | `run_floor` | The floor never goes down. |
-| `start_lands`, `complete_lands` | A fetch at or above the floor lands, and the floor passes it. |
+| `start_lands`, `complete_lands` | An issued fetch with `floor <= gen < next` lands, and the floor passes it. |
 | `complete_stale` | A completion below the floor changes nothing. |
 | `stale_forever` | Once a generation is below the floor, after any operations, its completion changes nothing. |
 | `invalidate_clears` | An invalidated key serves nothing. |

@@ -18,10 +18,19 @@ Keys and values are `Data`. A comparator or hash is a template, so you can pass 
 
 `hmap.bend` is a hash trie. `HMap.put` takes `~hash` and `~eq`. Equal keys must hash alike. Collisions are stored and compared with `~eq`.
 
-`vec.bend` is a growable array. `push` doubles and is amortized O(1). `get` and `pop` return `None` at or past the length. `set` at that index leaves the vector unchanged.
+`vec.bend` is a growable array. `Vec.push` doubles a full buffer and is amortized O(1). `Vec.get` returns the vector beside `None` at or past its length. `Vec.pop` takes no index and returns the vector beside `None` when it is empty. `Vec.set` at or past the length leaves the vector unchanged.
 
 `deque.bend` pushes and pops at either end in amortized O(1). A `Data` deque can be copied with `+`.
 
 `heap.bend` is a binary heap. `push` and `pop` take `~le` and are amortized O(log n) when the heap is used once. `peek` and `size` are O(1).
 
-`nat_order.bend` is lemmas for the ordered-map proofs, not a collection. It and `PROOF.bend` take generic Nat and Bool lemmas from `bend-mathlib@0.7.2.0`. The published files do not import it.
+`nat_order.bend` contains lemmas for the ordered-map proofs, not a collection. It and `PROOF.bend` take generic Nat and Bool lemmas from `bend-mathlib@0.7.2.0`. The published files do not import it.
+
+## API
+
+Import `omap.bend` as `OMap` for this call.
+
+| def | returns |
+|---|---|
+| `OMap.OMap.keys(K, V, m) -> List<&2, K>` | All keys in comparator order. `K` and `V` are `Data` types. |
+
