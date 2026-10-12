@@ -1,11 +1,11 @@
 import Base
 import ./sse.bend as Sse
 import ./llm.bend as Llm
-import bend-kit-http@0.32.0.0/http.bend as Http
-import bend-kit-http@0.32.0.0/admission.bend as Admission
-import bend-kit-http@0.32.0.0/completion.bend as Completion
-import 0x584fc27920487ceab242392391418d7f/json.bend as Json
-import 0x49814d83de8f70993a43e1002be29ecd/bytes.bend as Bytes
+import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-http@0.33.0.0/admission.bend as Admission
+import bend-kit-http@0.33.0.0/completion.bend as Completion
+import bend-kit-json@0.6.0.0/json.bend as Json
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 # The laws run in the checker. This runs the parser on the runtime at sizes the checker would not reach.
 
