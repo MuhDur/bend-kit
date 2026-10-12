@@ -66,9 +66,15 @@ A package is not done until its `bench/` runs. The bench times the package's hot
 - A package with no runtime hot path, such as `lemmas`, says so in `bench/README.md` instead.
 - Run a bench by hand. `scripts/check.sh` and CI do not run it.
 
-## Delivery
+## Development lifecycle
 
-- Finish coding work with a pull request. Commit and push the branch, then open a PR before reporting the work done.
+We improve the kit one ticket at a time, and each ticket ends by queuing the next improvements.
+
+1. **Pick.** Run the `next-issue` skill. When the user picks an issue, add the `in-progress` label first.
+2. **Build.** Do the work in a worktree. Run `scripts/check.sh` on each package you changed.
+3. **Ship.** Commit and push the branch, then open a PR before you report the work done. When CI is green and GitHub reports the PR mergeable, merge it. A package that a sibling imports from the hub publishes first, so its PR merges first.
+4. **Close.** Confirm that the issue closed, then remove its `in-progress` label.
+5. **File follow-ups.** Always end a ticket this way. List what the work left open: gaps it found, limits it documented, siblings left on old versions, and slow paths it measured. File an issue for each one that would make the library better, even when no caller needs it yet. Search open issues first, so you do not file a duplicate. Give each issue a `pri-*` label, a goal, a scope, and acceptance checks. Report the issues you filed.
 
 ## GitHub issues
 
