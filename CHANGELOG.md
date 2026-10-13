@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `gateway` 0.2.0.0: imports `cache` 0.2.0.0 and `collections` 0.1.3.0. Its one-key cache proofs use the published `order_string_refl` in place of a local proof about `key.cmp`. Breaking: `Gate` holds a `cache` 0.2.0.0 `Cache`.
 - `cache` 0.2.0.0, `sigv4` 0.5.0.1: order `String` keys with `Order.string` from `bend-kit-collections@0.1.3.0`. `cache` proves that `start`, `complete`, `invalidate`, and `evict` on one key leave every other key's slot as it was, and that every operation keeps the slots a search tree. Breaking for `cache`: `key.cmp` is gone, and `Cache` holds a `collections` 0.1.3.0 `OMap`.
 - `collections` 0.1.3.0: `order.bend` adds `Order.string`, a code-point order on strings that does not rebuild them. Proved: it is reflexive, antisymmetric, transitive, and EQ means equal strings, so it meets the `OMap` laws. `LAWS.bend` and `PROOF.bend` now publish with the package, so dependent packages can cite the `OMap` and `Order` laws.
 - `hairpin` 0.7.0.0: `open.as` follows the client's redirect mode, presents its certificate, and sends and stores cookies through its jar, as `request.as` does. The client's jar comes back with the stream's `Set-Cookie` fields. Breaking: imports `http` 0.34.0.0, so `Http` types come from that version.
