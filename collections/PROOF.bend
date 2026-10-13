@@ -5,6 +5,8 @@ import ./LAWS.bend as Laws
 import ./omap.bend as O
 import ./hmap.bend as M
 import ./nat_order.bend as Ord
+import ./order.bend as Order
+import bend-kit-lemmas@0.1.0.0/lemmas.bend as Lemmas
 
 def Laws.omap_keys_ascending_puts():
   {==}
@@ -3932,3 +3934,192 @@ def Laws.hmap_collision_size(K, V, hash, eq, refl, sound, m, wf, k1, k2, ne, sam
         Laws.hmap_get_put_other_key(~K, ~V, ~hash, ~eq, ~sound, m, wf, k1, k2, ne, v1), miss2)),
     Equal.cong(Nat, Nat, x => 1n+x, M.HMap.size(K, V, m1), 1n+M.HMap.size(K, V, m),
       Laws.hmap_size_put_new(~K, ~V, ~hash, ~eq, ~sound, m, wf, k1, v1, miss1)))
+
+# --- string order ----------------------------------------------------------------
+
+# A comparison equal to LT is not one whose is_lt is False.
+def lt_absurd(-A: Type, -c: Cmp, f: {Cmp.is_lt(c) == False{} : Bool}, e: {c == LT{} : Cmp}) -> A:
+  Empty.absurd(A, MBool.false_ne_true()(Equal.trans(Bool, False{}, Cmp.is_lt(c), True{},
+    Equal.sym(Bool, Cmp.is_lt(c), False{}, f), lt_true(c, e))))
+
+def ncmp_refl(n: Nat) -> {Nat.cmp(n, n) == EQ{} : Cmp}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      ncmp_refl(p)
+
+def ncmp_eq(a: Nat, b: Nat, e: {Nat.cmp(a, b) == EQ{} : Cmp}) -> {a == b : Nat}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+q:
+      ne_absurd({0n == 1n+q : Nat}, LT{}, {==}, e)
+    case 1n+p 0n:
+      ne_absurd({1n+p == 0n : Nat}, GT{}, {==}, e)
+    case 1n+p 1n+q:
+      %ncmp_eq(p, q, e) : {1n+p == 1n+_ : Nat}
+      {==}
+
+def ncmp_flip(a: Nat, b: Nat) -> {Nat.cmp(b, a) == Laws.flip(Nat.cmp(a, b)) : Cmp}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+q:
+      {==}
+    case 1n+p 0n:
+      {==}
+    case 1n+p 1n+q:
+      ncmp_flip(p, q)
+
+def ncmp_trans(
+  a: Nat, b: Nat, c: Nat, e1: {Nat.cmp(a, b) == LT{} : Cmp}, e2: {Nat.cmp(b, c) == LT{} : Cmp}
+) -> {Nat.cmp(a, c) == LT{} : Cmp}:
+  match a b c:
+    case 0n 0n _:
+      lt_absurd({Nat.cmp(0n, c) == LT{} : Cmp}, EQ{}, {==}, e1)
+    case 1n+p 0n _:
+      lt_absurd({Nat.cmp(1n+p, c) == LT{} : Cmp}, GT{}, {==}, e1)
+    case _ 1n+q 0n:
+      lt_absurd({Nat.cmp(a, 0n) == LT{} : Cmp}, GT{}, {==}, e2)
+    case 0n 1n+q 1n+r:
+      {==}
+    case 1n+p 1n+q 1n+r:
+      ncmp_trans(p, q, r, e1, e2)
+
+def ucmp_nat(+a: U32, +b: U32) -> {Nat.cmp(U32.to_nat(a), U32.to_nat(b)) == U32.cmp(a, b) : Cmp}:
+  Equal.sym(Cmp, U32.cmp(a, b), Nat.cmp(U32.to_nat(a), U32.to_nat(b)), Lemmas.u32_cmp_nat(a, b))
+
+def ucmp_refl(+x: U32) -> {U32.cmp(x, x) == EQ{} : Cmp}:
+  %ucmp_nat(x, x) : {_ == EQ{} : Cmp}
+  ncmp_refl(U32.to_nat(x))
+
+def ucmp_eq(+x: U32, +y: U32, e: {U32.cmp(x, y) == EQ{} : Cmp}) -> {x == y : U32}:
+  Lemmas.u32_to_nat_inj(x, y, ncmp_eq(U32.to_nat(x), U32.to_nat(y),
+    Equal.trans(Cmp, Nat.cmp(U32.to_nat(x), U32.to_nat(y)), U32.cmp(x, y), EQ{}, ucmp_nat(x, y), e)))
+
+def ucmp_flip(+x: U32, +y: U32) -> {U32.cmp(y, x) == Laws.flip(U32.cmp(x, y)) : Cmp}:
+  %ucmp_nat(y, x) : {_ == Laws.flip(U32.cmp(x, y)) : Cmp}
+  %ucmp_nat(x, y) : {Nat.cmp(U32.to_nat(y), U32.to_nat(x)) == Laws.flip(_) : Cmp}
+  ncmp_flip(U32.to_nat(x), U32.to_nat(y))
+
+def ucmp_lt(+x: U32, +y: U32, e: {U32.cmp(x, y) == LT{} : Cmp}) -> {Nat.cmp(U32.to_nat(x), U32.to_nat(y)) == LT{} : Cmp}:
+  Equal.trans(Cmp, Nat.cmp(U32.to_nat(x), U32.to_nat(y)), U32.cmp(x, y), LT{}, ucmp_nat(x, y), e)
+
+def ucmp_trans(
+  +x: U32, +y: U32, +z: U32, e1: {U32.cmp(x, y) == LT{} : Cmp}, e2: {U32.cmp(y, z) == LT{} : Cmp}
+) -> {U32.cmp(x, z) == LT{} : Cmp}:
+  %ucmp_nat(x, z) : {_ == LT{} : Cmp}
+  ncmp_trans(U32.to_nat(x), U32.to_nat(y), U32.to_nat(z), ucmp_lt(x, y, e1), ucmp_lt(y, z, e2))
+
+def Laws.order_string_refl(x):
+  match x:
+    case SNil{}:
+      {==}
+    case SCon{Chr{+c}, t}:
+      %Equal.sym(Cmp, U32.cmp(c, c), EQ{}, ucmp_refl(c)) : {Order.string.fin(_, Order.string(t, t)) == EQ{} : Cmp}
+      Laws.order_string_refl(t)
+
+# One step of eq on the heads a and b, with the tails' result as ih.
+def seq.step(
+  +a: U32, +b: U32, +s: String, +t: String, c: Cmp, h: {U32.cmp(a, b) == c : Cmp},
+  e: {Order.string.fin(c, Order.string(s, t)) == EQ{} : Cmp},
+  ih: {Order.string(s, t) == EQ{} : Cmp} -> {s == t : String}
+) -> {SCon{Chr{a}, s} == SCon{Chr{b}, t} : String}:
+  match c:
+    case LT{}:
+      ne_absurd({SCon{Chr{a}, s} == SCon{Chr{b}, t} : String}, LT{}, {==}, e)
+    case EQ{}:
+      +ea = ucmp_eq(a, b, h)
+      +es = ih(e)
+      %ea : {SCon{Chr{a}, s} == SCon{Chr{_}, t} : String}
+      %es : {SCon{Chr{a}, s} == SCon{Chr{a}, _} : String}
+      {==}
+    case GT{}:
+      ne_absurd({SCon{Chr{a}, s} == SCon{Chr{b}, t} : String}, GT{}, {==}, e)
+
+def Laws.order_string_eq(x, y, e):
+  match x y:
+    case SNil{} SNil{}:
+      {==}
+    case SNil{} SCon{Chr{b}, t}:
+      ne_absurd({SNil{} == SCon{Chr{b}, t} : String}, LT{}, {==}, e)
+    case SCon{Chr{a}, s} SNil{}:
+      ne_absurd({SCon{Chr{a}, s} == SNil{} : String}, GT{}, {==}, e)
+    case SCon{Chr{+a}, +s} SCon{Chr{+b}, +t}:
+      seq.step(a, b, s, t, U32.cmp(a, b), {==}, e, p => Laws.order_string_eq(s, t, p))
+
+def sfin_flip(c: Cmp, -r: Cmp) -> {Order.string.fin(Laws.flip(c), Laws.flip(r)) == Laws.flip(Order.string.fin(c, r)) : Cmp}:
+  match c:
+    case LT{}:
+      {==}
+    case EQ{}:
+      {==}
+    case GT{}:
+      {==}
+
+def Laws.order_string_flip(x, y):
+  match x y:
+    case SNil{} SNil{}:
+      {==}
+    case SNil{} SCon{Chr{b}, t}:
+      {==}
+    case SCon{Chr{a}, s} SNil{}:
+      {==}
+    case SCon{Chr{+a}, +s} SCon{Chr{+b}, +t}:
+      %Equal.sym(Cmp, U32.cmp(b, a), Laws.flip(U32.cmp(a, b)), ucmp_flip(a, b)) :
+        {Order.string.fin(_, Order.string(t, s)) == Laws.flip(Order.string.fin(U32.cmp(a, b), Order.string(s, t))) : Cmp}
+      %Equal.sym(Cmp, Order.string(t, s), Laws.flip(Order.string(s, t)), Laws.order_string_flip(s, t)) :
+        {Order.string.fin(Laws.flip(U32.cmp(a, b)), _) == Laws.flip(Order.string.fin(U32.cmp(a, b), Order.string(s, t))) : Cmp}
+      sfin_flip(U32.cmp(a, b), Order.string(s, t))
+
+# One step of transitivity on the heads a < b < c, with the tails' result as ih.
+def strans.step(
+  +a: U32, +b: U32, +c: U32, -s: String, -t: String, -u: String, c1: Cmp, c2: Cmp,
+  h1: {U32.cmp(a, b) == c1 : Cmp}, h2: {U32.cmp(b, c) == c2 : Cmp},
+  e1: {Order.string.fin(c1, Order.string(s, t)) == LT{} : Cmp},
+  e2: {Order.string.fin(c2, Order.string(t, u)) == LT{} : Cmp},
+  ih: {Order.string(s, t) == LT{} : Cmp} -> {Order.string(t, u) == LT{} : Cmp} -> {Order.string(s, u) == LT{} : Cmp}
+) -> {Order.string.fin(U32.cmp(a, c), Order.string(s, u)) == LT{} : Cmp}:
+  match c1 c2:
+    case LT{} LT{}:
+      %Equal.sym(Cmp, U32.cmp(a, c), LT{}, ucmp_trans(a, b, c, h1, h2)) : {Order.string.fin(_, Order.string(s, u)) == LT{} : Cmp}
+      {==}
+    case LT{} EQ{}:
+      +ebc = ucmp_eq(b, c, h2)
+      +eac = rw(U32, w => {U32.cmp(a, w) == LT{} : Cmp}, c, b, Equal.sym(U32, b, c, ebc), h1)
+      %Equal.sym(Cmp, U32.cmp(a, c), LT{}, eac) : {Order.string.fin(_, Order.string(s, u)) == LT{} : Cmp}
+      {==}
+    case EQ{} LT{}:
+      +eab = ucmp_eq(a, b, h1)
+      +eac = rw(U32, w => {U32.cmp(w, c) == LT{} : Cmp}, a, b, eab, h2)
+      %Equal.sym(Cmp, U32.cmp(a, c), LT{}, eac) : {Order.string.fin(_, Order.string(s, u)) == LT{} : Cmp}
+      {==}
+    case EQ{} EQ{}:
+      +eca = Equal.sym(U32, a, c, Equal.trans(U32, a, b, c, ucmp_eq(a, b, h1), ucmp_eq(b, c, h2)))
+      +eac = rw(U32, w => {U32.cmp(a, w) == EQ{} : Cmp}, c, a, eca, ucmp_refl(a))
+      %Equal.sym(Cmp, U32.cmp(a, c), EQ{}, eac) : {Order.string.fin(_, Order.string(s, u)) == LT{} : Cmp}
+      ih(e1, e2)
+    case GT{} _:
+      lt_absurd({Order.string.fin(U32.cmp(a, c), Order.string(s, u)) == LT{} : Cmp}, GT{}, {==}, e1)
+    case _ GT{}:
+      lt_absurd({Order.string.fin(U32.cmp(a, c), Order.string(s, u)) == LT{} : Cmp}, GT{}, {==}, e2)
+
+def Laws.order_string_trans(x, y, z, e1, e2):
+  match x y z:
+    case SNil{} SNil{} _:
+      lt_absurd({Order.string(SNil{}, z) == LT{} : Cmp}, EQ{}, {==}, e1)
+    case SCon{Chr{a}, s} SNil{} _:
+      lt_absurd({Order.string(SCon{Chr{a}, s}, z) == LT{} : Cmp}, GT{}, {==}, e1)
+    case SNil{} SCon{Chr{b}, t} SNil{}:
+      lt_absurd({Order.string(SNil{}, SNil{}) == LT{} : Cmp}, GT{}, {==}, e2)
+    case SCon{Chr{a}, s} SCon{Chr{b}, t} SNil{}:
+      lt_absurd({Order.string(SCon{Chr{a}, s}, SNil{}) == LT{} : Cmp}, GT{}, {==}, e2)
+    case SNil{} SCon{Chr{b}, t} SCon{Chr{c}, u}:
+      {==}
+    case SCon{Chr{+a}, +s} SCon{Chr{+b}, +t} SCon{Chr{+c}, +u}:
+      strans.step(a, b, c, s, t, u, U32.cmp(a, b), U32.cmp(b, c), {==}, {==}, e1, e2,
+        p => q => Laws.order_string_trans(s, t, u, p, q))
+
+def Laws.order_string_fixtures():
+  {==}
