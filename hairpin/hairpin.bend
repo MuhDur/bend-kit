@@ -1,6 +1,6 @@
 # Hairpin: an HTTP client with a base URL, default headers, a pool, cookies, mTLS, redirects, and proven retries. Source: https://github.com/paymog/bend-kit/tree/main/hairpin
 import Base
-import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-http@0.34.0.0/http.bend as Http
 import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-url@0.4.1.0/url.bend as Url
 import bend-kit-json@0.6.0.0/json.bend as Json
@@ -261,16 +261,23 @@ def try.res(o: Opts, call: Call, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, body
   Call{+enc, +method, +u, +headers} = call
   once(ms, mode, cert, enc, pool, jar, method, u, headers, body)
 
-# One attempt that opens a stream on its own connection. It follows redirects and decodes the body by enc.
-# The pool, the jar, and the certificate are not used.
+def try.stream.got(pool: Http.Pool, x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) ->
+    Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>:
+  (jar, s) = x
+  (pool, jar, s)
+
+# One attempt that opens a stream on its own connection, outside the pool: the redirect loop with the mode,
+# the jar, and the certificate, then the body decoded by enc.
 def try.stream(o: Opts, call: Call, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, body: Bytes.Bytes) ->
     IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>):
   Opts{base, h, +ms, mode, p, cert} = o
   Call{+enc, method, u, headers} = call
   do IO<Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>>:
-    r : Result<&1, &1, Http.Err, Http.Stream> <- Http.stream.hops(ms, Http.stream.start(method, Http.accept.enc(headers, enc), body, u))
-    s : Result<&1, &1, Http.Err, Http.Stream> <- Http.stream.init(enc, r)
-    return (pool, jar, s)
+    now : Maybe<&2, Http.Jar> <- jar.now(jar)
+    r : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.stream.hops(mode, ms, Http.StreamHops{Http.stream.start(method, Http.accept.enc(headers, enc), body, u), cert, now})
+    x : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <- Http.stream.init.jar(enc, r)
+    return try.stream.got(pool, x)
 
 def close.res(r: Http.Res) -> IO(Unit):
   IO.pure(Unit, Unit{})
@@ -402,9 +409,10 @@ def request.as(~judge: Result<&1, &1, Http.Err, Http.Res> -> Result<&1, &1, Http
   run(~Http.Res, ~judge, ~try.res, ~close.res, c, b, idem, enc, method, url, headers, body)
 
 # A streamed request under the same budget, deadline, backoff, and breaker as request.as. The stream opens its
-# own connection outside the pool and follows redirects; the jar and the certificate do not apply. judge reads
-# the status and headers through Http.stream.res. A refused stream closes before the next attempt; the last
-# one comes back open, so the caller can read its body.
+# own connection outside the pool. It follows the client's redirect mode, presents its certificate, and sends
+# and stores cookies through its jar, as request.as does. judge reads the status and headers through
+# Http.stream.res. A refused stream closes before the next attempt; the last one comes back open, so the
+# caller can read its body.
 def open.as(~judge: Result<&1, &1, Http.Err, Http.Stream> -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>,
     c: Client, b: Retry.Budget, +idem: Bool, +enc: String, +method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Client & Retry.Budget & Result<&1, &1, Err, Http.Stream>):

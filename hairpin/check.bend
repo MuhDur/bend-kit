@@ -1,9 +1,9 @@
 import Base
 import ./hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-http@0.33.0.0/http.bend as Http
-import bend-kit-http@0.33.0.0/admission.bend as Admission
-import bend-kit-http@0.33.0.0/completion.bend as Completion
+import bend-kit-http@0.34.0.0/http.bend as Http
+import bend-kit-http@0.34.0.0/admission.bend as Admission
+import bend-kit-http@0.34.0.0/completion.bend as Completion
 import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-json@0.6.0.0/json.bend as Json
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
@@ -371,6 +371,55 @@ def opened() -> IO(Unit):
     Hairpin.close(c1)
     served("opened: 3 attempts", ch)
 
+def jarred.first(r: Http.Jar & Http.Res) -> Http.Jar:
+  (j, res) = r
+  j
+
+def jarred.start(+now: Time.Instant) -> Http.Jar:
+  jarred.first(Http.jar.store(Http.jar.new(now), "http://127.0.0.1:47837/", Http.Res{200, Http.set(Http.empty(), "set-cookie", "pre=1"), Bytes.new(0)}))
+
+def jarred.sent(m: Maybe<&2, Http.Jar>) -> String:
+  match m:
+    case None{}:
+      "no jar"
+    case Some{j}:
+      Http.header(Http.jar.apply(j, "http://127.0.0.1:47837/", Http.empty()), "cookie")
+
+def jarred.jar(x: Hairpin.Client & Maybe<&2, Http.Jar>) -> IO(Unit):
+  (c, m) = x
+  +sent = jarred.sent(m)
+  do IO<Unit>:
+    ok(String.eq(sent, "pre=1; sid=abc"), "open.as: the jar comes back with the server's Set-Cookie (" ++ sent ++ ")")
+    Hairpin.close(c)
+
+def jarred.read(x: Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> IO(Unit):
+  (st, r) = x
+  +seen = piece(r)
+  do IO<Unit>:
+    Http.stream.close(st)
+    ok(String.eq(seen, "GET /api/echo   pre=1; sid=abc"), "open.as: the jar's cookie and the first hop's Set-Cookie reach the second hop (" ++ seen ++ ")")
+
+def jarred(r: Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream>) -> IO(Unit):
+  (c, b, m) = r
+  match m:
+    case Fail{e}:
+      IO.die(Unit, 1, "FAIL open.as with a jar: no stream opened")
+    case Done{st}:
+      do IO<Unit>:
+        y : Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>> <- Http.stream.read(st)
+        jarred.read(y)
+        jarred.jar(Hairpin.jar.of(c))
+
+# A stream through open.as sends the client's jar cookie and stores the redirect's Set-Cookie.
+def jarred.test() -> IO(Unit):
+  do IO<Unit>:
+    ch : Chan(Unit) <- server(47837, [login(), echoed()])
+    now : Time.Instant <- Time.now()
+    r : Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream> <-
+      Hairpin.open.as(~judge.stream, Hairpin.jar(at(47837), jarred.start(now)), Retry.Budget.new(1n, 0n, None{}), True{}, "identity", "GET", "login", Http.empty(), Bytes.new(0))
+    jarred(r)
+    served("jarred: 2 attempts", ch)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     basics()
@@ -380,3 +429,4 @@ def main() -> IO(Unit):
     nested()
     judged()
     opened()
+    jarred.test()
