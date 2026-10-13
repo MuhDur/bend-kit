@@ -1,10 +1,12 @@
 import Base
 import bend-mathlib@0.7.2.0/nat.bend as MNat
-import bend-kit-lemmas@0.1.0.0/lemmas.bend as Lemmas
 import bend-kit-authz@0.1.0.0/authz.bend as Az
-import bend-kit-collections@0.1.2.0/omap.bend as OMap
+import bend-kit-collections@0.1.3.0/omap.bend as OMap
+import bend-kit-collections@0.1.3.0/order.bend as Order
+import bend-kit-collections@0.1.3.0/LAWS.bend as CL
+import bend-kit-collections@0.1.3.0/PROOF.bend as CP
 import bend-kit-resources@0.1.0.0/resources.bend as Res
-import bend-kit-cache@0.1.0.0/cache.bend as C
+import bend-kit-cache@0.2.0.0/cache.bend as C
 import ./gateway.bend as G
 import ./LAWS.bend as Laws
 
@@ -115,34 +117,20 @@ def Laws.finish_unheld(o, c, cache, p, u):
 def Laws.every_path_releases(pol, req, o, c, h, cache, k, now, u):
   granted.round(Az.granted(pol, req), o, c, h, cache, k, now, u)
 
-def nat_cmp_refl(n: Nat) -> {EQ{} == Nat.cmp(n, n) : Cmp}:
-  match n:
-    case 0n:
-      {==}
-    case 1n+p:
-      nat_cmp_refl(p)
-
-# The cache's key order puts every key equal to itself.
-def key_refl(k: String) -> {EQ{} == C.key.cmp(k, k) : Cmp}:
-  match k:
-    case SNil{}:
-      {==}
-    case SCon{Chr{+x}, s}:
-      %Equal.sym(Cmp, U32.cmp(x, x), Nat.cmp(U32.to_nat(x), U32.to_nat(x)), Lemmas.u32_cmp_nat(x, x)) : {EQ{} == C.key.cmp.fin(_, C.key.cmp(s, s)) : Cmp}
-      %nat_cmp_refl(U32.to_nat(x)) : {EQ{} == C.key.cmp.fin(_, C.key.cmp(s, s)) : Cmp}
-      key_refl(s)
+def key_refl(+k: String) -> {EQ{} == Order.string(k, k) : Cmp}:
+  Equal.sym(Cmp, Order.string(k, k), EQ{}, CL.order_string_refl(k))
 
 def get1(+k: String, +s: C.Slot<String>)
-    -> {Some{s} == OMap.OMap.get(~String, ~C.Slot<String>, ~C.key.cmp, OMap.OBin{1, k, s, OMap.OTip{}, OMap.OTip{}}, k) : Maybe<&2, C.Slot<String>>}:
+    -> {Some{s} == OMap.OMap.get(~String, ~C.Slot<String>, ~Order.string, OMap.OBin{1, k, s, OMap.OTip{}, OMap.OTip{}}, k) : Maybe<&2, C.Slot<String>>}:
   %key_refl(k) : {Some{s} == OMap.Cmp.case(Maybe<&2, C.Slot<String>>, _, u => None{}, u => Some{s}, u => None{}) : Maybe<&2, C.Slot<String>>}
   {==}
 
 def put1(+k: String, +s: C.Slot<String>, +v: C.Slot<String>)
-    -> {OMap.OBin{1, k, v, OMap.OTip{}, OMap.OTip{}} == OMap.OMap.put(~String, ~C.Slot<String>, ~C.key.cmp, OMap.OBin{1, k, s, OMap.OTip{}, OMap.OTip{}}, k, v) : OMap.OMap<String, C.Slot<String>>}:
+    -> {OMap.OBin{1, k, v, OMap.OTip{}, OMap.OTip{}} == OMap.OMap.put(~String, ~C.Slot<String>, ~Order.string, OMap.OBin{1, k, s, OMap.OTip{}, OMap.OTip{}}, k, v) : OMap.OMap<String, C.Slot<String>>}:
   %key_refl(k) : {OMap.OBin{1, k, v, OMap.OTip{}, OMap.OTip{}} == OMap.Cmp.case(OMap.OMap<String, C.Slot<String>>, _,
-    u => OMap.OMap.balance(String, C.Slot<String>, k, s, OMap.OMap.put(~String, ~C.Slot<String>, ~C.key.cmp, OMap.OTip{}, k, v), OMap.OTip{}),
+    u => OMap.OMap.balance(String, C.Slot<String>, k, s, OMap.OMap.put(~String, ~C.Slot<String>, ~Order.string, OMap.OTip{}, k, v), OMap.OTip{}),
     u => OMap.OBin{1, k, v, OMap.OTip{}, OMap.OTip{}},
-    u => OMap.OMap.balance(String, C.Slot<String>, k, s, OMap.OTip{}, OMap.OMap.put(~String, ~C.Slot<String>, ~C.key.cmp, OMap.OTip{}, k, v))) : OMap.OMap<String, C.Slot<String>>}
+    u => OMap.OMap.balance(String, C.Slot<String>, k, s, OMap.OTip{}, OMap.OMap.put(~String, ~C.Slot<String>, ~Order.string, OMap.OTip{}, k, v))) : OMap.OMap<String, C.Slot<String>>}
   {==}
 
 # A fetch on a one-key cache takes the slot's next generation.
