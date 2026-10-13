@@ -1,6 +1,8 @@
 import Base
 import bend-mathlib@0.7.2.0/nat.bend as MNat
 import ./cache.bend as C
+import bend-kit-collections@0.1.3.0/LAWS.bend as CL
+import bend-kit-collections@0.1.3.0/order.bend as Order
 
 # One operation on one key, in the order the cache sees it.
 type Op<-V: Data> is Data:
@@ -250,3 +252,51 @@ law evict_only_availability:
   for +p: C.Policy
   for s: C.Slot<V>
   {C.Slot.evict(V, run(V, os, p, C.Slot.evict(V, s))) == C.Slot.evict(V, run(V, os, p, s)) : C.Slot<V>}
+
+# Keys
+# ----
+
+# The slots form a search tree under the key order. Cache.new gives one, and every operation keeps it.
+def keyed(~V: Data, c: C.Cache<V>) -> Bool:
+  C.Cache{p, slots} = c
+  CL.searchtree(~String, ~C.Slot<V>, ~Order.string, slots)
+
+def slot(~V: Data, c: C.Cache<V>, +key: String) -> C.Slot<V>:
+  C.Cache{p, slots} = c
+  C.Cache.slot(~V, slots, key)
+
+# One operation on key. Complete takes a ticket for key.
+def apply(~V: Data, o: Op<V>, c: C.Cache<V>, +key: String) -> C.Cache<V>:
+  match o:
+    case Start{}:
+      Pair.snd(C.Ticket, C.Cache<V>, C.Cache.start(~V, c, key, 0n))
+    case Complete{g, at, r}:
+      C.Cache.complete(~V, c, C.Ticket{key, g, at}, r)
+    case Invalidate{}:
+      C.Cache.invalidate(~V, c, key)
+    case Evict{}:
+      C.Cache.evict(~V, c, key)
+
+law new_keyed:
+  for ~V: Data
+  for p: C.Policy
+  {keyed(~V, C.Cache.new(V, p)) == True{} : Bool}
+
+law apply_keyed:
+  for ~V: Data
+  for +o: Op<V>
+  for c: C.Cache<V>
+  for h: {keyed(~V, c) == True{} : Bool}
+  for +key: String
+  {keyed(~V, apply(~V, o, c, key)) == True{} : Bool}
+
+# An operation on one key leaves the slot of every other key as it was.
+law apply_other_key:
+  for ~V: Data
+  for +o: Op<V>
+  for +c: C.Cache<V>
+  for h: {keyed(~V, c) == True{} : Bool}
+  for +key: String
+  for +other: String
+  for ne: {key != other : String}
+  {slot(~V, apply(~V, o, c, key), other) == slot(~V, c, other) : C.Slot<V>}

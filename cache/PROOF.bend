@@ -1,6 +1,10 @@
 import Base
 import bend-mathlib@0.7.2.0/nat.bend as MNat
 import ./cache.bend as C
+import bend-kit-collections@0.1.3.0/omap.bend as OMap
+import bend-kit-collections@0.1.3.0/order.bend as Order
+import bend-kit-collections@0.1.3.0/LAWS.bend as CL
+import bend-kit-collections@0.1.3.0/PROOF.bend as CP
 import ./LAWS.bend as Laws
 
 # Bool and order lemmas
@@ -232,3 +236,69 @@ def Laws.evict_only_availability(V, os, p, s):
   match s:
     case C.Slot{n, f, m}:
       evict_same(V, os, p, n, f, None{}, m)
+
+# Keys
+# ----
+
+# The slot that one operation on key stores back.
+def next(~V: Data, o: Laws.Op<V>, p: C.Policy, slots: OMap.OMap<String, C.Slot<V>>, +key: String) -> C.Slot<V>:
+  match o:
+    case Laws.Start{}:
+      Pair.snd(Nat, C.Slot<V>, C.Slot.start(V, C.Cache.slot(~V, slots, key)))
+    case Laws.Complete{g, at, r}:
+      C.Slot.complete(V, p, C.Cache.slot(~V, slots, key), g, at, r)
+    case Laws.Invalidate{}:
+      C.Slot.invalidate(V, C.Cache.slot(~V, slots, key))
+    case Laws.Evict{}:
+      C.Slot.evict(V, C.Cache.slot(~V, slots, key))
+
+def start_put(~V: Data, +p: C.Policy, +slots: OMap.OMap<String, C.Slot<V>>, +key: String, r: Nat & C.Slot<V>)
+  -> {Pair.snd(C.Ticket, C.Cache<V>, C.Cache.start.fin(~V, p, slots, key, 0n, r)) == C.Cache.put(~V, p, slots, key, Pair.snd(Nat, C.Slot<V>, r)) : C.Cache<V>}:
+  match r:
+    case (g, s):
+      {==}
+
+# Every operation on key reads key's slot and stores one slot back at key.
+def apply_put(~V: Data, o: Laws.Op<V>, +p: C.Policy, +slots: OMap.OMap<String, C.Slot<V>>, +key: String)
+  -> {Laws.apply(~V, o, C.Cache{p, slots}, key) == C.Cache.put(~V, p, slots, key, next(~V, o, p, slots, key)) : C.Cache<V>}:
+  match o:
+    case Laws.Start{}:
+      start_put(~V, p, slots, key, C.Slot.start(V, C.Cache.slot(~V, slots, key)))
+    case Laws.Complete{g, at, r}:
+      {==}
+    case Laws.Invalidate{}:
+      {==}
+    case Laws.Evict{}:
+      {==}
+
+def ne_cmp(+key: String, +other: String, ne: {key != other : String}) -> {Order.string(key, other) != EQ{} : Cmp}:
+  e => ne(CL.order_string_eq(key, other, e))
+
+def put_other(
+  ~V: Data, p: C.Policy, +slots: OMap.OMap<String, C.Slot<V>>,
+  tree: {CL.searchtree(~String, ~C.Slot<V>, ~Order.string, slots) == True{} : Bool},
+  +key: String, +other: String, ne: {key != other : String}, +s: C.Slot<V>
+) -> {Laws.slot(~V, C.Cache.put(~V, p, slots, key, s), other) == C.Cache.slot(~V, slots, other) : C.Slot<V>}:
+  Equal.cong(Maybe<&2, C.Slot<V>>, C.Slot<V>, mm => Maybe.default(&2, C.Slot<V>, mm, C.Slot.new(V)),
+    OMap.OMap.get(~String, ~C.Slot<V>, ~Order.string, OMap.OMap.put(~String, ~C.Slot<V>, ~Order.string, slots, key, s), other),
+    OMap.OMap.get(~String, ~C.Slot<V>, ~Order.string, slots, other),
+    CL.omap_get_put_other_key(~String, ~C.Slot<V>, ~Order.string, ~CL.order_string_refl, ~CL.order_string_eq,
+      ~CL.order_string_flip, ~CL.order_string_trans, slots, tree, key, other, ne_cmp(key, other, ne), s))
+
+def Laws.new_keyed(V, p):
+  {==}
+
+def Laws.apply_keyed(V, o, c, h, key):
+  match c:
+    case C.Cache{+p, +slots}:
+      %Equal.sym(C.Cache<V>, Laws.apply(~V, o, C.Cache{p, slots}, key), C.Cache.put(~V, p, slots, key, next(~V, o, p, slots, key)), apply_put(~V, o, p, slots, key)) :
+        {Laws.keyed(~V, _) == True{} : Bool}
+      CL.omap_put_searchtree(~String, ~C.Slot<V>, ~Order.string, ~CL.order_string_refl, ~CL.order_string_eq,
+        ~CL.order_string_flip, ~CL.order_string_trans, slots, h, key, next(~V, o, p, slots, key))
+
+def Laws.apply_other_key(V, o, c, h, key, other, ne):
+  match c:
+    case C.Cache{+p, +slots}:
+      %Equal.sym(C.Cache<V>, Laws.apply(~V, o, C.Cache{p, slots}, key), C.Cache.put(~V, p, slots, key, next(~V, o, p, slots, key)), apply_put(~V, o, p, slots, key)) :
+        {Laws.slot(~V, _, other) == Laws.slot(~V, C.Cache{p, slots}, other) : C.Slot<V>}
+      put_other(~V, p, slots, h, key, other, ne, next(~V, o, p, slots, key))

@@ -8,6 +8,7 @@ import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-url@0.4.1.0/url.bend as Url
 import bend-kit-encoding@0.4.0.0/encoding.bend as Enc
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-collections@0.1.3.0/order.bend as Order
 
 # Text (path, query, header values) is a String of code points; non-ASCII is sent as UTF-8.
 # S3 decodes and re-encodes wire escapes once; other services encode an escaped wire path twice.
@@ -166,7 +167,7 @@ def pair.le.of(c: Cmp, av: String, bv: String) -> Bool:
 def pair.le(a: Sigma<&2, &2, String, _ => String>, b: Sigma<&2, &2, String, _ => String>) -> Bool:
   (ak, av) = a
   (bk, bv) = b
-  pair.le.of(String.order(ak, bk), av, bv)
+  pair.le.of(Order.string(ak, bk), av, bv)
 
 def pairs.show(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, String>:
   match xs:

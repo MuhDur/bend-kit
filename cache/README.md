@@ -3,10 +3,10 @@
 Cache validity for keyed values: expiry, negative results, invalidation, eviction, and fetch completions that cannot bring back stale data. It decides what a cache may serve. It does not fetch, store to disk, or talk to the network: your code does the fetch, and the cache decides whether the result lands.
 
 ```bend
-import bend-kit-cache@0.1.0.0/cache.bend as C
+import bend-kit-cache@0.2.0.0/cache.bend as C
 ```
 
-It imports `bend-kit-collections@0.1.2.0` (`omap.bend`). Keys are `String`; values are any `Data` type `V`.
+It imports `bend-kit-collections@0.1.3.0` (`omap.bend` and `order.bend`). Keys are `String`, in `Order.string` order; values are any `Data` type `V`.
 
 ## Example
 
@@ -14,7 +14,7 @@ A configuration value changes upstream while a fetch of the old value is in flig
 
 ```bend
 import Base
-import bend-kit-cache@0.1.0.0/cache.bend as C
+import bend-kit-cache@0.2.0.0/cache.bend as C
 
 def show(r: Maybe<&2, C.Entry<String>>) -> String:
   match r:
@@ -98,7 +98,14 @@ The `Slot.*` defs are the same operations on one key, and they are what the laws
 
 Equality in the laws is equality of `Slot` values: same `next`, same `floor`, same entry.
 
-The laws cover one key. The keyed `Cache` reads a key's slot with `OMap.get`, applies the slot operation, and writes it back with `OMap.put`, using `key.cmp` as the order. That other keys do not change rests on `omap_get_put_same` and `omap_get_put_other_key`, proven in `collections`, and on `key.cmp` being a total order, which is not proven here. `check.bend` tests it: evicting one key leaves another key's value as it was.
+The laws above cover one key. These cover the keyed `Cache`:
+
+| law | claim |
+|---|---|
+| `new_keyed`, `apply_keyed` | `Cache.new` gives a cache whose slots form a search tree under `Order.string`, and every operation keeps it one. |
+| `apply_other_key` | `start`, `complete`, `invalidate`, or `evict` on one key leaves the slot of every other key as it was. |
+
+Their proofs cite `omap_put_searchtree`, `omap_get_put_other_key`, and the `Order.string` order laws from `bend-kit-collections@0.1.3.0`.
 
 ## Trust boundary
 
