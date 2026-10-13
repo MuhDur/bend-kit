@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `camber` 0.9.0.0: the owner keeps lent resources in a `bend-kit-resources@0.1.0.0` pool. `Counts.in_use` is the pool's reserved count. A `Returned` with no matching `Submit` stops the owner instead of clamping `in_use` at zero. Breaking: `OwnerStep` carries a `Ledger`, not `Counts`.
 - `jwt` 0.5.0.0, `llm` 0.6.0.0, `oauth2` 0.5.0.0, `sigv4` 0.5.0.0, `webhooks` 0.5.0.0: import `hairpin` 0.6.0.0, `http` 0.33.0.0, and the converged siblings by name. Programs that use them now carry one version of each C effect, so they build natively. Breaking: `Hairpin`, `Http`, `Time`, `Json`, and `Bytes` types come from those versions.
 - `camber` 0.8.0.0, `hairpin` 0.6.0.0: import `http` 0.33.0.0 and the converged siblings by name. `hairpin` imports one `time` (0.2.0.0) for both wall and monotonic clocks, so it no longer pulls two versions of the `time` C effect into one program. Breaking: `Http`, `Time`, `Json`, and `Bytes` types come from the converged versions.
 - `archive` 0.3.0.0, `http` 0.33.0.0, `runner` 0.2.0.0: import the converged siblings by name. `http` takes `bytes` 0.3.2.0, `json` 0.6.0.0, `encoding` 0.4.0.0, `http2` 0.3.0.0, `zlib` 0.3.0.0, `url` 0.4.1.0, and `time` 0.2.0.0. Breaking: `Http` `Instant`s are `time` 0.2.0.0 values, and `Bytes` is the 0.3.2.0 type.
