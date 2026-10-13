@@ -3,8 +3,8 @@
 An HTTP/1.1 and HTTP/2 client, and an HTTP/1.1 server. Bodies are packed `Bytes`.
 
 ```bend
-import bend-kit-http@0.33.0.0/http.bend as Http
-import bend-kit-http@0.33.0.0/completion.bend as Completion
+import bend-kit-http@0.34.0.0/http.bend as Http
+import bend-kit-http@0.34.0.0/completion.bend as Completion
 ```
 
 `Http.Body` uses `bend-kit-bytes@0.3.2.0`. JSON values for `post.json` use `bend-kit-json@0.6.0.0`. DNS lookup uses `bend-kit-dns@0.6.0.2`. TLS uses `bend-kit-wire@0.4.6.1`.
@@ -15,7 +15,7 @@ HTTPS needs OpenSSL 3. On macOS, `brew install openssl@3`. Set `BEND_LIBSSL` if 
 
 ```bend
 import Base
-import bend-kit-http@0.33.0.0/http.bend as Http
+import bend-kit-http@0.34.0.0/http.bend as Http
 
 def show(got: Result<&1, &1, Http.Err, Http.Res>) -> IO(Unit):
   match got:
@@ -71,7 +71,7 @@ A response over 16 MiB of body or 64 KiB of head is `ErrBad`. `Content-Length` t
 
 ## Streams, pools, and cookies
 
-`open` follows redirects and returns a `Stream` when the head is in. `stream.res` is the status and headers. `stream.read` is the next decoded piece, or `None` at the end. `stream.close` closes the socket. `open.raw` returns bytes as sent. `upload` sends a chunked body. `upload.write` sends one piece. `upload.finish` ends the body and returns the response as a `Stream`. Uploads do not follow redirects.
+`open` follows redirects and returns a `Stream` when the head is in. `stream.res` is the status and headers. `stream.read` is the next decoded piece, or `None` at the end. `stream.close` closes the socket. `open.raw` returns bytes as sent. `open.how(mode, cert, jar, method, url, headers, body, ms)` opens a stream as `fetch` sends a request: `mode` decides what a redirect does, `cert` follows only same-origin hops, and the jar, when it is `Some`, sends and stores cookies on every hop. It returns the jar beside the stream. `open.raw.how` does the same with bytes as sent. `upload` sends a chunked body. `upload.write` sends one piece. `upload.finish` ends the body and returns the response as a `Stream`. Uploads do not follow redirects.
 
 `pool.fetch` is `fetch` on a pool of idle sockets. It returns the pool beside the result. Pass that pool on. `pool.close` closes the idle sockets. The default cap is 8 idle sockets per origin. `pool.new.with(cap)` sets another. A reused socket that fails before any response byte is retried once for GET, HEAD, OPTIONS, TRACE, PUT, and DELETE. For an HTTP/2 origin, the pool keeps one session and closes it after GOAWAY.
 
@@ -85,8 +85,8 @@ A convenience handler returns `IO(Reply)`. `Reply` is the `Res` plus a completio
 
 ```bend
 import Base
-import bend-kit-http@0.33.0.0/http.bend as Http
-import bend-kit-http@0.33.0.0/completion.bend as Completion
+import bend-kit-http@0.34.0.0/http.bend as Http
+import bend-kit-http@0.34.0.0/completion.bend as Completion
 
 def hello(req: Http.Req) -> IO(Http.Reply):
   Http.Req{method, path, headers, body} = req

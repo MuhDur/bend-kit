@@ -265,6 +265,25 @@ def local.gz.test() -> IO(Unit):
       Http.open("GET", "http://127.0.0.1:47813/", Http.empty(), Bytes.new(0))
     local.gz.check("68656c6c6f20726177", 1, deflated)
 
+def opened.body(+name: String, +want: String, got: Http.Stream & Bytes.Bytes & U32) -> IO(Unit):
+  (end, body, count) = got
+  +seen = Bytes.to_string(body)
+  do IO<Unit>:
+    local.ok(String.eq(seen, want), name ++ " (got " ++ seen ++ ")")
+    Http.stream.close(end)
+
+# The whole body of an opened stream, checked against want. The jar comes back.
+def opened.got(+name: String, +want: String, x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Maybe<&2, Http.Jar>):
+  (m, r) = x
+  match r:
+    case Fail{e}:
+      IO.die(Maybe<&2, Http.Jar>, 1, name ++ ": open failed")
+    case Done{st}:
+      do IO<Maybe<&2, Http.Jar>>:
+        got : Http.Stream & Bytes.Bytes & U32 <- local.gz.read(20n, GrRead{st, Bytes.new(0), 0})
+        opened.body(name, want, got)
+        return m
+
 def mtls.ok(+want: String, r: Result<&1, &1, Http.Err, Http.Res>) -> IO(Unit):
   match r:
     case Fail{e}:
@@ -315,6 +334,12 @@ def mtls.run(+one: String, +key1: String, +two: String, +key2: String) -> IO(Uni
     back : Result<&1, &1, Http.Err, Http.Res> <-
       Http.fetch.cert("GET", "https://localhost:39444/back", Http.empty(), Bytes.new(0), one, key1)
     mtls.err(back)
+    streamed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeFollow{}, Some{Http.Cert{one, key1}}, None{}, "GET", "https://localhost:39444/who", Http.empty(), Bytes.new(0), 30000)
+    j1 : Maybe<&2, Http.Jar> <- opened.got("mTLS stream identity", "client-one", streamed)
+    crossed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeFollow{}, Some{Http.Cert{one, key1}}, None{}, "GET", "https://localhost:39444/cross", Http.empty(), Bytes.new(0), 30000)
+    j2 : Maybe<&2, Http.Jar> <- opened.got("mTLS stream: no certificate after a cross-origin redirect", "clean", crossed)
     first : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
       Http.pool.fetch.cert(Http.pool.new(), "GET", "https://localhost:39444/who", Http.empty(), Bytes.new(0), one, key1)
     p1 : Http.Pool <- mtls.pool.good("client-one", first)
@@ -787,6 +812,77 @@ def cookie.test() -> IO(Unit):
     now : Time.Instant <- Time.now()
     cookie.live(now)
 
+# cookie.srv, one connection per accept, then the listener closes.
+def redir.serve(n: Nat, +inbox: Chan(Admission.Command), l: Listener) -> IO(Unit):
+  match n:
+    case 0n:
+      do IO<Unit>:
+        Listener.close(l)
+        Admission.close(inbox)
+    case 1n+p:
+      do IO<Unit>:
+        a : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
+        l1 : Listener <- Http.conn(~(req => local.reply(cookie.srv(req))), ~Completion.ignore, Http.limits(1048576n), inbox, a)
+        redir.serve(p, inbox, l1)
+
+def redir.start(l: Listener) -> IO(Unit):
+  do IO<Unit>:
+    +inbox : Chan(Admission.Command) <- Admission.open(Admission.Caps{128, 128, 128})
+    redir.serve(4n, inbox, l)
+
+def redir.jar(m: Maybe<&2, Http.Jar>) -> String:
+  match m:
+    case None{}:
+      "no jar"
+    case Some{j}:
+      cookie.sent(j, "http://127.0.0.1:47818/")
+
+def redir.error(x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Unit):
+  (m, r) = x
+  match r:
+    case Fail{e}:
+      match e:
+        case Http.ErrRedirect{}:
+          IO.print("ok stream ModeError fails on a redirect, as fetch does")
+        case other:
+          IO.die(Unit, 1, "stream ModeError failed with another error")
+    case Done{st}:
+      do IO<Unit>:
+        Http.stream.close(st)
+        IO.die(Unit, 1, "stream ModeError opened a redirect")
+
+def redir.manual.res(sr: Http.Stream & Http.Res) -> IO(Unit):
+  (st, res) = sr
+  Http.Res{+status, headers, body} = res
+  do IO<Unit>:
+    local.ok(U32.is_eq(status, 302), "stream ModeManual returns the 302 as the stream")
+    Http.stream.close(st)
+
+def redir.manual(x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Unit):
+  (m, r) = x
+  match r:
+    case Fail{e}:
+      IO.die(Unit, 1, "stream ModeManual open failed")
+    case Done{st}:
+      redir.manual.res(Http.stream.res(st))
+
+# /login answers 302 to /home with a cookie; /home echoes the cookies it got.
+def redir.test() -> IO(Unit):
+  do IO<Unit>:
+    now : Time.Instant <- Time.now()
+    l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47818))
+    IO.spawn(Unit, redir.start(l))
+    followed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeFollow{}, None{}, Some{Http.jar.new(now)}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
+    j : Maybe<&2, Http.Jar> <- opened.got("stream jar: Set-Cookie on the first hop is sent on the second", "sid=abc", followed)
+    local.ok(String.eq(redir.jar(j), "sid=abc; last=1"), "stream jar comes back with both Set-Cookie fields")
+    failed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeError{}, None{}, None{}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
+    redir.error(failed)
+    manual : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeManual{}, None{}, None{}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
+    redir.manual(manual)
+
 def limits.overflow(turn: Http.Turn) -> Bool:
   match turn:
     case Http.TurnFail{status}:
@@ -858,5 +954,6 @@ def main() -> IO(Unit):
     local.proxy.test()
     all.test()
     cookie.test()
+    redir.test()
     args : List<&1, String> <- IO.args()
     mtls.args(List.tail(&1, String, args))

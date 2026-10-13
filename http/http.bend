@@ -21,7 +21,7 @@ import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
 # Bodies are Bytes. The String parsers below are the spec: one Char per octet.
 # fetch reads until frame() says the response is whole. It returns Result, not Maybe.
 # Build with -o for big bodies: the `bend file.bend` runner overflows on ~30 KB strings; native binaries do not.
-#   import bend-kit-http@0.33.0.0/http.bend as Http
+#   import bend-kit-http@0.34.0.0/http.bend as Http
 
 type Req is Type:
   Req{method: String, path: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes}
@@ -4774,8 +4774,8 @@ def stream.conn(r: Result<&1, &1, Err, Conn>, +ms: U32, +head: Bool, wire: Bytes
             Wire.tls.close(s)
             return Fail{ErrBad{}}
 
-# One connection per stream; the request says close.
-def stream.origin(+ms: U32, +head: Bool, wire: Bytes.Bytes, a: Url.Abs, known: Bool) -> IO(Result<&1, &1, Err, Stream>):
+# One connection per stream; the request says close. cert: the client identity for this origin.
+def stream.origin(+ms: U32, +head: Bool, wire: Bytes.Bytes, a: Url.Abs, known: Bool, cert: Maybe<&2, Cert>) -> IO(Result<&1, &1, Err, Stream>):
   Url.Abs{+scheme, +host, +port, target} = a
   match known:
     case False{}:
@@ -4783,20 +4783,22 @@ def stream.origin(+ms: U32, +head: Bool, wire: Bytes.Bytes, a: Url.Abs, known: B
     case True{}:
       do IO<Result<&1, &1, Err, Stream>>:
         ips : List<&2, String> <- Dns.resolve.all(host)
-        c : Result<&1, &1, Err, Conn> <- conn.open.all(String.eq(scheme, "https"), ms, host, port, ips, None{}, False{}, "")
+        c : Result<&1, &1, Err, Conn> <- conn.open.all(String.eq(scheme, "https"), ms, host, port, ips, cert, False{}, "")
         stream.conn(c, ms, head, wire)
 
-def stream.one.of(+method: String, +url: Url.Abs, +headers: Map<&2, List<&2, String>>, +ms: U32, r: Bytes.Bytes & Bytes.Bytes) -> IO(Hop & Result<&1, &1, Err, Stream>):
+# sent is headers plus any jar cookies; the hop keeps headers, so cookies never pile up across hops.
+def stream.one.of(+method: String, +url: Url.Abs, headers: Map<&2, List<&2, String>>, sent: Map<&2, List<&2, String>>,
+    +ms: U32, r: Bytes.Bytes & Bytes.Bytes, cert: Maybe<&2, Cert>) -> IO(Hop & Result<&1, &1, Err, Stream>):
   Url.Abs{scheme, host, port, +target} = url
   (body, wire) = r
   do IO<Hop & Result<&1, &1, Err, Stream>>:
-    got : Result<&1, &1, Err, Stream> <- stream.origin(ms, String.eq(method, "HEAD"), encode_req.on(method, target, Url.host_field(url), headers, wire, True{}), url, pool.scheme.ok(url))
+    got : Result<&1, &1, Err, Stream> <- stream.origin(ms, String.eq(method, "HEAD"), encode_req.on(method, target, Url.host_field(url), sent, wire, True{}), url, pool.scheme.ok(url), cert)
     return (Hop{method, url, headers, body}, got)
 
 # One request on its own connection. The hop comes back for the redirect.
-def stream.one(h: Hop, +ms: U32) -> IO(Hop & Result<&1, &1, Err, Stream>):
+def stream.one(h: Hop, +ms: U32, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>) -> IO(Hop & Result<&1, &1, Err, Stream>):
   Hop{+method, +url, +headers, body} = h
-  stream.one.of(method, url, headers, ms, Bytes.slice(body, 0, 4294967295))
+  stream.one.of(method, url, headers, jar.opt.apply(jar, url, headers), ms, Bytes.slice(body, 0, 4294967295), cert)
 
 # Go: the next request. Drop: close this stream, then go on. Done: the answer.
 type Sn is Type:
@@ -4817,40 +4819,75 @@ def sn.of(n: Next) -> Sn:
         case Done{r}:
           SnDone{Fail{ErrBad{}}}
 
+def stream.decide.done(st: Stream, m: Result<&1, &1, Err, Res>) -> Sn:
+  match m:
+    case Fail{e}:
+      SnDrop{st, NDone{Fail{e}}}
+    case Done{r}:
+      SnDone{Done{st}}
+
 def stream.decide.n(st: Stream, n: Next) -> Sn:
   match n:
     case NDone{m}:
-      SnDone{Done{st}}
+      stream.decide.done(st, m)
     case NGo{l, h}:
       SnDrop{st, NGo{l, h}}
     case NStop{}:
       SnDrop{st, NStop{}}
 
-def stream.decide.of(+left: Nat, hop: Hop, sr: Stream & Res) -> Sn:
-  (st, res) = sr
-  stream.decide.n(st, fetch.decide(left, hop, Done{res}))
+# The redirect loop's state for a stream: what to do next, the client identity, and the jar.
+type StreamHops is Type:
+  StreamHops{next: Sn, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>}
 
-def stream.decide(+left: Nat, x: Hop & Result<&1, &1, Err, Stream>) -> Sn:
+# The certificate goes on only to a hop on the same origin, as in pool.next.move.
+def stream.cert(+old: String, cert: Maybe<&2, Cert>, n: Next) -> Next & Maybe<&2, Cert>:
+  match n:
+    case NGo{left, h}:
+      Hop{method, +url, headers, body} = h
+      (NGo{left, Hop{method, url, headers, body}}, Bool.pick(Maybe<&2, Cert>, String.eq(old, redirect.origin(url)), cert, None{}))
+    case NDone{r}:
+      (NDone{r}, None{})
+    case NStop{}:
+      (NStop{}, None{})
+
+def stream.decide.cert(st: Stream, jar: Maybe<&2, Jar>, nc: Next & Maybe<&2, Cert>) -> StreamHops:
+  (n, cert) = nc
+  StreamHops{stream.decide.n(st, n), cert, jar}
+
+def stream.decide.jar(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, st: Stream, +old: String, hop: Hop,
+    r: Maybe<&2, Jar> & Result<&1, &1, Err, Res>) -> StreamHops:
+  (jar, m) = r
+  stream.decide.cert(st, jar, stream.cert(old, cert, fetch.policy(mode, left, hop, m)))
+
+# The jar takes the response's Set-Cookie fields first, redirect or not.
+def stream.decide.of(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, hop: Hop, sr: Stream & Res) -> StreamHops:
+  Hop{method, +url, headers, body} = hop
+  (st, res) = sr
+  stream.decide.jar(mode, left, cert, st, redirect.origin(url), Hop{method, url, headers, body}, jar.opt.store(jar, url, Done{res}))
+
+def stream.decide(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, x: Hop & Result<&1, &1, Err, Stream>) -> StreamHops:
   (hop, r) = x
   match r:
     case Fail{e}:
-      SnDone{Fail{e}}
+      StreamHops{SnDone{Fail{e}}, cert, jar}
     case Done{st}:
-      stream.decide.of(left, hop, stream.res(st))
+      stream.decide.of(mode, left, cert, jar, hop, stream.res(st))
 
+# mode says what a redirect does, as in pool.hops. The jar comes back beside the stream.
 @unsafe
-def stream.hops(+ms: U32, sn: Sn) -> IO(Result<&1, &1, Err, Stream>):
+def stream.hops(+mode: Mode, +ms: U32, hs: StreamHops) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
+  StreamHops{sn, +cert, +jar} = hs
   match sn:
     case SnDone{r}:
-      IO.pure(Result<&1, &1, Err, Stream>, r)
-    case SnGo{+left, hop}:
-      do IO<Result<&1, &1, Err, Stream>>:
-        x : Hop & Result<&1, &1, Err, Stream> <- stream.one(hop, ms)
-        stream.hops(ms, stream.decide(left, x))
+      IO.pure(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>, (jar, r))
+    case SnGo{left, hop}:
+      do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
+        x : Hop & Result<&1, &1, Err, Stream> <- stream.one(hop, ms, cert, jar)
+        stream.hops(mode, ms, stream.decide(mode, left, cert, jar, x))
     case SnDrop{st, next}:
-      do IO<Result<&1, &1, Err, Stream>>:
+      do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
         stream.close(st)
-        stream.hops(ms, sn.of(next))
+        stream.hops(mode, ms, StreamHops{sn.of(next), cert, jar})
 
 type Opened is Type:
   Opened{decs: List<&1, Zlib.Decoder>, bad: Bool}
@@ -4943,6 +4980,12 @@ def stream.init(+enc: String, r: Result<&1, &1, Err, Stream>) -> IO(Result<&1, &
     case Done{st}:
       stream.init.st(enc, st)
 
+def stream.init.jar(+enc: String, x: Maybe<&2, Jar> & Result<&1, &1, Err, Stream>) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
+  (jar, r) = x
+  do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
+    s : Result<&1, &1, Err, Stream> <- stream.init(enc, r)
+    return (jar, s)
+
 def stream.start(method: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, u: Maybe<&2, Url.Abs>) -> Sn:
   match u:
     case None{}:
@@ -4950,24 +4993,45 @@ def stream.start(method: String, headers: Map<&2, List<&2, String>>, body: Bytes
     case Some{a}:
       SnGo{20n, Hop{method, a, req.put(Map.to_list(&2, List<&2, String>, headers), empty()), body}}
 
-# Open a raw stream. Its body bytes and headers remain as sent.
+def stream.only(x: Maybe<&2, Jar> & Result<&1, &1, Err, Stream>) -> Result<&1, &1, Err, Stream>:
+  (jar, r) = x
+  r
+
+# A raw stream with every choice of fetch: mode for redirects, cert for the first origin and each
+# same-origin hop, and a jar that gives cookies to every hop and takes them from every response.
+# The jar comes back beside the stream. Body bytes and headers remain as sent.
+def open.raw.how(mode: Mode, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, method: String, url: String,
+    headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
+  stream.hops(mode, ms, StreamHops{stream.start(method, headers, body, Url.absolute(url)), cert, jar})
+
+# Open a raw stream. It follows redirects, with no client certificate and no jar.
 def open.raw.with(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Result<&1, &1, Err, Stream>):
-  stream.hops(ms, stream.start(method, headers, body, Url.absolute(url)))
+  do IO<Result<&1, &1, Err, Stream>>:
+    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <- open.raw.how(ModeFollow{}, None{}, None{}, method, url, headers, body, ms)
+    return stream.only(x)
 
 def open.raw(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Result<&1, &1, Err, Stream>):
   open.raw.with(method, url, headers, body, 30000)
 
-def open.with.enc(+enc: String, method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Result<&1, &1, Err, Stream>):
-  do IO<Result<&1, &1, Err, Stream>>:
-    r : Result<&1, &1, Err, Stream> <-
-      stream.hops(ms, stream.start(method, accept.enc(headers, enc), body, Url.absolute(url)))
-    stream.init(enc, r)
+def open.how.enc(+enc: String, mode: Mode, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, method: String, url: String,
+    headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
+  do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
+    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <-
+      stream.hops(mode, ms, StreamHops{stream.start(method, accept.enc(headers, enc), body, Url.absolute(url)), cert, jar})
+    stream.init.jar(enc, x)
 
-# Follow redirects, then decode each body piece by Content-Encoding. Unknown codings stay raw.
+# open.raw.how, then each body piece decoded by Content-Encoding (see codings). Unknown codings stay raw.
+def open.how(mode: Mode, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, method: String, url: String,
+    headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
+  do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
+    enc : String <- codings()
+    open.how.enc(enc, mode, cert, jar, method, url, headers, body, ms)
+
+# Follow redirects, then decode each body piece by Content-Encoding. No client certificate and no jar.
 def open.with(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Result<&1, &1, Err, Stream>):
   do IO<Result<&1, &1, Err, Stream>>:
-    enc : String <- codings()
-    open.with.enc(enc, method, url, headers, body, ms)
+    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <- open.how(ModeFollow{}, None{}, None{}, method, url, headers, body, ms)
+    return stream.only(x)
 
 def open(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Result<&1, &1, Err, Stream>):
   open.with(method, url, headers, body, 30000)
