@@ -276,6 +276,48 @@ def scenario.opened(opened: Camber.Owner<Bundle, U32, Input, U32, U32>, +path: S
     closed(late_closed)
     IO.print("camber owner: PASS")
 
+def ledger.lend(value: Maybe<&1, Camber.Ledger>) -> Maybe<&1, Camber.Ledger>:
+  match value:
+    case None{}:
+      None{}
+    case Some{ledger}:
+      Camber.ledger.lend(ledger)
+
+def ledger.give(value: Maybe<&1, Camber.Ledger>) -> Maybe<&1, Camber.Ledger>:
+  match value:
+    case None{}:
+      None{}
+    case Some{ledger}:
+      Camber.ledger.give(ledger)
+
+def ledger.counted(counted: Camber.Counts & Camber.Ledger, in_use: Nat, completed: Nat) -> Bool:
+  (counts, ledger) = counted
+  Camber.Counts{capacity, used, done, lost} = counts
+  Nat.is_eq(used, in_use) && Nat.is_eq(done, completed)
+
+def ledger.is(value: Maybe<&1, Camber.Ledger>, in_use: Nat, completed: Nat) -> Bool:
+  match value:
+    case None{}:
+      False{}
+    case Some{ledger}:
+      ledger.counted(Camber.ledger.counts(ledger), in_use, completed)
+
+def ledger.absent(value: Maybe<&1, Camber.Ledger>) -> Bool:
+  match value:
+    case None{}:
+      True{}
+    case Some{ledger}:
+      False{}
+
+def ledger.check() -> IO(Unit):
+  do IO<Unit>:
+    require(ledger.absent(Camber.ledger.give(Camber.ledger.open(2n))), "a return without a submit was accepted")
+    require(ledger.absent(ledger.give(ledger.give(Camber.ledger.lend(Camber.ledger.open(2n))))), "a second return of one submit was accepted")
+    require(ledger.absent(ledger.lend(Camber.ledger.lend(Camber.ledger.open(1n)))), "a full pool lent a unit")
+    require(ledger.is(ledger.lend(Camber.ledger.lend(Camber.ledger.open(2n))), 2n, 0n), "two lends did not hold two units")
+    require(ledger.is(ledger.give(Camber.ledger.lend(Camber.ledger.open(2n))), 0n, 1n), "a return did not release its unit")
+    IO.print("camber ledger: PASS")
+
 def scenario(+path: String) -> IO(Unit):
   do IO<Unit>:
     startup : Result<&2, &1, U32, Camber.Owner<Bundle, U32, Input, U32, U32>> <- Camber.start(~Config, ~Bundle, ~U32, ~Input, ~U32, ~U32, ~create, ~handler, ~destroy, Config{path, False{}}, 2n, 8)
@@ -285,6 +327,7 @@ def scenario(+path: String) -> IO(Unit):
 def main() -> IO(Unit):
   do IO<Unit>:
     seed : U32 <- IO.try(U32, IO.random_u32())
+    ledger.check()
     scenario("camber-owner-336-" ++ U32.show(seed))
     Dispatch.main()
     Response.main()
