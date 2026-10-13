@@ -1,6 +1,7 @@
 # Cache validity: expiry, negative results, invalidation, and generation-safe fetch completion. Source: https://github.com/paymog/bend-kit/tree/main/cache
 import Base
-import bend-kit-collections@0.1.2.0/omap.bend as OMap
+import bend-kit-collections@0.1.3.0/omap.bend as OMap
+import bend-kit-collections@0.1.3.0/order.bend as Order
 
 # How long a result stays fresh, in the units of the caller's clock.
 type Policy is Data:
@@ -102,35 +103,14 @@ def Slot.evict(-V: Data, s: Slot<V>) -> Slot<V>:
 # Cache
 # -----
 
-def key.cmp.fin(c: Cmp, rest: Cmp) -> Cmp:
-  match c:
-    case LT{}:
-      LT{}
-    case EQ{}:
-      rest
-    case GT{}:
-      GT{}
-
-# Keys in code-point order. String.order rebuilds both strings on every call.
-def key.cmp(a: String, b: String) -> Cmp:
-  match a b:
-    case SNil{} SNil{}:
-      EQ{}
-    case SNil{} SCon{h, t}:
-      LT{}
-    case SCon{h, t} SNil{}:
-      GT{}
-    case SCon{Chr{+x}, s} SCon{Chr{+y}, t}:
-      key.cmp.fin(U32.cmp(x, y), key.cmp(s, t))
-
 def Cache.new(-V: Data, p: Policy) -> Cache<V>:
   Cache{p, OMap.OMap.new(String, Slot<V>)}
 
 def Cache.slot(~V: Data, slots: OMap.OMap<String, Slot<V>>, +key: String) -> Slot<V>:
-  Maybe.default(&2, Slot<V>, OMap.OMap.get(~String, ~Slot<V>, ~key.cmp, slots, key), Slot.new(V))
+  Maybe.default(&2, Slot<V>, OMap.OMap.get(~String, ~Slot<V>, ~Order.string, slots, key), Slot.new(V))
 
 def Cache.put(~V: Data, p: Policy, slots: OMap.OMap<String, Slot<V>>, +key: String, +s: Slot<V>) -> Cache<V>:
-  Cache{p, OMap.OMap.put(~String, ~Slot<V>, ~key.cmp, slots, key, s)}
+  Cache{p, OMap.OMap.put(~String, ~Slot<V>, ~Order.string, slots, key, s)}
 
 # The fresh entry for key at `now`, or None when the caller must fetch.
 def Cache.read(~V: Data, c: Cache<V>, +key: String, +now: Nat) -> Maybe<&2, Entry<V>>:

@@ -128,7 +128,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`oauth2`](oauth2) | `bend-kit-oauth2@0.4.0.0/oauth2.bend` | Client credentials, refresh, and authorization code with PKCE. |
 | [`authz`](authz) | `bend-kit-authz@0.1.0.0/authz.bend` | Pure authorization policies: deny-overrides, default deny, intersection, and fail-closed missing context. |
 | [`jwt`](jwt) | `bend-kit-jwt@0.4.0.0/jwt.bend` | HS256/384/512, RS256, and ES256, plus JWKS lookup. |
-| [`sigv4`](sigv4) | `bend-kit-sigv4@0.4.0.0/sigv4.bend` | AWS Signature V4 and S3 over `hairpin`. |
+| [`sigv4`](sigv4) | `bend-kit-sigv4@0.5.0.1/sigv4.bend` | AWS Signature V4 and S3 over `hairpin`. |
 | [`webhooks`](webhooks) | `bend-kit-webhooks@0.4.0.0/webhooks.bend` | Standard Webhooks, Stripe, and GitHub signature checks. |
 
 ### Programs
@@ -146,7 +146,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`resources`](resources) | `bend-kit-resources@0.1.0.0/resources.bend` | Bounded capacity pools with affine reservations: reserve, release, split, and combine. |
 | [`journal`](journal) | `bend-kit-journal@0.1.0.0/journal.bend` | An append-only journal: checksummed frames, fsync'd appends, and proven crash recovery of the committed prefix. |
 | [`runner`](runner) | `bend-kit-runner@0.1.0.0/runner.bend` | A durable job runner: a journaled queue, a bounded pool, retry, and a breaker per target, with proven replay. |
-| [`cache`](cache) | `bend-kit-cache@0.1.0.0/cache.bend` | Cache validity: expiry, negative results, invalidation, and generation-safe fetch completion. |
+| [`cache`](cache) | `bend-kit-cache@0.2.0.0/cache.bend` | Cache validity: expiry, negative results, invalidation, and generation-safe fetch completion. |
 | [`notch`](notch) | `bend-kit-notch@0.1.0.1/notch.bend` | Leveled logfmt or JSON-lines logging. |
 | [`tty`](tty) | `bend-kit-tty@0.1.0.1/tty.bend` | Terminal size, color, and display width. |
 | [`router`](router) | `bend-kit-router@0.2.0.0/router.bend` | Prepared HTTP routes. Target parsing is `target.bend`. |
