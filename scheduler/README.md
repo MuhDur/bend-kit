@@ -1,10 +1,10 @@
 # scheduler
 
-Pure deadline queues and recurrence planning. Import `bend-kit-scheduler@0.2.0.0/queue.bend` as `Queue` and `bend-kit-scheduler@0.2.0.0/recurrence.bend` as `Recurrence`.
+Pure deadline queues and recurrence planning. Import `bend-kit-scheduler@0.3.0.0/queue.bend` as `Queue` and `bend-kit-scheduler@0.3.0.0/recurrence.bend` as `Recurrence`.
 
 ## Queue transitions
 
-`State<A>` stores copyable payloads in the `collections@0.1.2.0` skew heap. Thread the returned state through every transition; do not fork state snapshots into independent runners.
+`State<A>` stores copyable payloads in the `collections@0.1.3.0` skew heap. Thread the returned state through every transition; do not fork state snapshots into independent runners.
 
 | Operation | Result | Meaning |
 |---|---|---|
