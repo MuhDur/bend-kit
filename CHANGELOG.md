@@ -10,6 +10,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 - CI: `scripts/pins.sh` fails on a `scripts/pins.allow` line that no import uses, and when a `VERSION` rises it lists the siblings still on the old version.
 - CI: `scripts/pins.sh` fails a pull request whose changed packages import a sibling at a version other than its `VERSION`, or by hash; `scripts/pins.allow` lists the waves still waiting on a publish. `webhooks` builds natively, so two versions of one C effect cannot slip back in.
+- `runner` 0.3.0.0: imports `scheduler` 0.3.0.0 and `collections` 0.1.3.0. Breaking: tickets are `scheduler` 0.3.0.0 types.
 - `http` 0.35.0.0: imports `json` 0.6.1.1. Breaking: `Http.json` and `post.json` take and give that version's `Json.Val`.
 - `scheduler` 0.3.0.0: imports `collections` 0.1.3.0. Breaking: `State` holds a `collections` 0.1.3.0 `Heap`.
 - `camber` 0.10.0.0, `jwt` 0.6.0.0, `llm` 0.7.0.0, `oauth2` 0.6.0.0, `sigv4` 0.6.0.0, `webhooks` 0.6.0.0: import `http` 0.34.0.0, and all but `camber` import `hairpin` 0.7.0.0, so `Hairpin.open.as` honors the client's redirect mode, jar, and certificate, and a program with `hairpin` 0.7.0.0 carries one version of the `http` C effects. Breaking: `Http` and `Hairpin` types come from those versions.

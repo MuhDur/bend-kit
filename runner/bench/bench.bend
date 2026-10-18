@@ -2,8 +2,8 @@
 import Base
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-journal@0.2.0.0/journal.bend as J
-import bend-kit-scheduler@0.2.0.0/queue.bend as Q
-import bend-kit-collections@0.1.2.0/heap.bend as H
+import bend-kit-scheduler@0.3.0.0/queue.bend as Q
+import bend-kit-collections@0.1.3.0/heap.bend as H
 import bend-kit-time@0.2.0.0/time.bend as Time
 import ../runner.bend as R
 
