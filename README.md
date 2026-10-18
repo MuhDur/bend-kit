@@ -133,7 +133,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`time`](time) | `bend-kit-time@0.1.3.0/time.bend` | Clocks, dates, RFC 3339, HTTP-date, and TZif zones. |
 | [`random`](random) | `bend-kit-random@0.1.0.1/random.bend` | Seeded xoshiro128**. Not for cryptography. |
 | [`concurrency`](concurrency) | `bend-kit-concurrency@0.2.0.0/concurrency.bend` | Parallel map and reduce, a worker pool, `select`, and `timeout`. |
-| [`scheduler`](scheduler) | `bend-kit-scheduler@0.2.0.0/queue.bend` | Pure stable deadline queues, cancellation tokens, and bounded recurrence planning. |
+| [`scheduler`](scheduler) | `bend-kit-scheduler@0.3.0.0/queue.bend` | Pure stable deadline queues, cancellation tokens, and bounded recurrence planning. |
 | [`resources`](resources) | `bend-kit-resources@0.1.0.0/resources.bend` | Bounded capacity pools with affine reservations: reserve, release, split, and combine. |
 | [`journal`](journal) | `bend-kit-journal@0.1.0.0/journal.bend` | An append-only journal: checksummed frames, fsync'd appends, and proven crash recovery of the committed prefix. |
 | [`runner`](runner) | `bend-kit-runner@0.1.0.0/runner.bend` | A durable job runner: a journaled queue, a bounded pool, retry, and a breaker per target, with proven replay. |
