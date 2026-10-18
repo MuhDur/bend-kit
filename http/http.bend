@@ -11,7 +11,7 @@ import bend-kit-int@0.2.0.0/int.bend as Int
 import bend-kit-concurrency@0.2.0.0/concurrency.bend as Conc
 import bend-kit-url@0.4.1.0/url.bend as Url
 import bend-kit-encoding@0.4.0.0/encoding.bend as Enc
-import bend-kit-json@0.6.0.0/json.bend as Json
+import bend-kit-json@0.6.1.1/json.bend as Json
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-dns@0.6.0.2/dns.bend as Dns
 import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
@@ -21,7 +21,7 @@ import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
 # Bodies are Bytes. The String parsers below are the spec: one Char per octet.
 # fetch reads until frame() says the response is whole. It returns Result, not Maybe.
 # Build with -o for big bodies: the `bend file.bend` runner overflows on ~30 KB strings; native binaries do not.
-#   import bend-kit-http@0.34.0.0/http.bend as Http
+#   import bend-kit-http@0.35.0.0/http.bend as Http
 
 type Req is Type:
   Req{method: String, path: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes}
