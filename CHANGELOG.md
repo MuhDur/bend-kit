@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- Examples and checks: `camber`'s examples, `authz/check.bend`, `gateway`'s app, check, and demo, and `runner/example.bend` import `camber` 0.11.0.0, `webhooks` 0.7.0.0, `hairpin` 0.8.0.0, `http` 0.35.0.0, and `json` 0.6.1.1. The kit now uses one version of each of those.
 - `camber` 0.11.0.0, `jwt` 0.7.0.0, `llm` 0.8.0.0, `oauth2` 0.7.0.0, `sigv4` 0.7.0.0, `webhooks` 0.7.0.0: import `http` 0.35.0.0 and `json` 0.6.1.1, and all but `camber` import `hairpin` 0.8.0.0. Breaking: `Http`, `Hairpin`, and `Json` types come from those versions.
 - CI: `scripts/pins.sh` fails on a `scripts/pins.allow` line that no import uses, and when a `VERSION` rises it lists the siblings still on the old version.
 - CI: `scripts/pins.sh` fails a pull request whose changed packages import a sibling at a version other than its `VERSION`, or by hash; `scripts/pins.allow` lists the waves still waiting on a publish. `webhooks` builds natively, so two versions of one C effect cannot slip back in.
