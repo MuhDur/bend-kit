@@ -55,12 +55,13 @@ def rounds(k: Nat, g: Gen, +j: Nat, +half: Nat) -> Gen:
     case 1n+p:
       rounds(p, finish(put(g, R.Select{1024n}), j, half), 1n+j, half)
 
-def log(g: Gen) -> Bytes.Bytes:
+# The log, and the journal that compacting it writes: one frame that holds the snapshot of the final state.
+def logs(g: Gen) -> Bytes.Bytes & Bytes.Bytes:
   Gen{b, s} = g
-  b
+  (b, J.frame(R.encode.snap(~U32, ~penc, s)))
 
-def build(+n: Nat) -> Bytes.Bytes:
-  log(rounds(n, enqueues(n, Gen{Bytes.new(0), R.new(U32)}, 0), 0n, Nat.div(n, 2n)))
+def build(+n: Nat) -> Bytes.Bytes & Bytes.Bytes:
+  logs(rounds(n, enqueues(n, Gen{Bytes.new(0), R.new(U32)}, 0), 0n, Nat.div(n, 2n)))
 
 # Sum of id * 31 + deadline over the pending tickets, and their count.
 def sum(h: H.Heap<Q.Ticket<U32>>, +acc: Nat) -> Nat:
@@ -70,20 +71,20 @@ def sum(h: H.Heap<Q.Ticket<U32>>, +acc: Nat) -> Nat:
     case H.HNode{n, Q.Ticket{+i, +d, x}, l, r}:
       sum(l, sum(r, Nat.add(acc, Nat.add(Nat.mul(i, 31n), d))))
 
-def shown(m: Maybe<&2, R.State<U32>>, t0: Time.Duration) -> IO(Unit):
+def shown(+op: String, m: Maybe<&2, R.State<U32>>, t0: Time.Duration) -> IO(Unit):
   match m:
     case Some{R.State{Q.State{next, +h, run}, ts}}:
       do IO<Unit>:
-        IO.print("chk\treplay\t" ++ Nat.show(Nat.mod(sum(h, 0n), Nat.mul(65536n, 65536n))))
-        IO.print("n\treplay\t" ++ Nat.show(H.Heap.size(Q.Ticket<U32>, h)) ++ "/" ++ Nat.show(next))
+        IO.print("chk\t" ++ op ++ "\t" ++ Nat.show(Nat.mod(sum(h, 0n), Nat.mul(65536n, 65536n))))
+        IO.print("n\t" ++ op ++ "\t" ++ Nat.show(H.Heap.size(Q.Ticket<U32>, h)) ++ "/" ++ Nat.show(next))
         t1 : Time.Duration <- Time.mono()
-        IO.print("ms\treplay\t" ++ Time.Duration.show_ms(Time.Duration.sub(t1, t0)))
+        IO.print("ms\t" ++ op ++ "\t" ++ Time.Duration.show_ms(Time.Duration.sub(t1, t0)))
     case None{}:
-      IO.die(Unit, 1, "replay met a record that is not an op")
+      IO.die(Unit, 1, "replay met a record that is not a runner record")
 
-def at(t0: Time.Duration, r: J.Replay<Maybe<&2, R.State<U32>>, J.Cur>) -> IO(Unit):
+def at(+op: String, t0: Time.Duration, r: J.Replay<Maybe<&2, R.State<U32>>, J.Cur>) -> IO(Unit):
   J.Replay{acc, t, rest} = r
-  shown(acc, t0)
+  shown(op, acc, t0)
 
 def lg(args: List<&1, String>) -> Nat:
   match args:
@@ -92,9 +93,19 @@ def lg(args: List<&1, String>) -> Nat:
     case _:
       15n
 
+# open's fold over b. A snapshot is one record, so max is the 1 GiB cap of the input, as open reads with limit.
+def replay(b: Bytes.Bytes) -> J.Replay<Maybe<&2, R.State<U32>>, J.Cur>:
+  J.replay.bytes(~Maybe<&2, R.State<U32>>, ~(a => p => R.replay.step(~U32, ~pdec, a, p)), 1073741824, b, Some{R.new(U32)})
+
+def timed(x: Bytes.Bytes & Bytes.Bytes) -> IO(Unit):
+  (full, small) = x
+  do IO<Unit>:
+    t0 : Time.Duration <- Time.mono()
+    at("replay", t0, replay(full))
+    t1 : Time.Duration <- Time.mono()
+    at("compacted", t1, replay(small))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<&1, String> <- IO.args()
-    b : Bytes.Bytes = build(Nat.pow(2n, lg(args)))
-    t0 : Time.Duration <- Time.mono()
-    at(t0, J.replay.bytes(~Maybe<&2, R.State<U32>>, ~(a => p => R.replay.step(~U32, ~pdec, a, p)), 64, b, Some{R.new(U32)}))
+    timed(build(Nat.pow(2n, lg(args))))

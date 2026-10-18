@@ -58,6 +58,40 @@ law replay_prefix:
   for s: R.State<A>
   {replayed(~A, ~X, ~enc, ~dec, List.take(&2, R.Op<A>, ops, k), s) == Some{live(~A, List.take(&2, R.Op<A>, ops, k), s)} : Maybe<&2, R.State<A>>}
 
+# ---- compaction
+
+# open's fold: each record, a snapshot or an op, into the replayed state.
+def restore.from(~A: Data, ~X: Type, ~dec: X -> Maybe<&2, R.Rec<A>>, xs: List<&1, X>, acc: Maybe<&2, R.State<A>>) -> Maybe<&2, R.State<A>>:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{x, rest}:
+      restore.from(~A, ~X, ~dec, rest, R.load(~A, ~X, ~dec, acc, x))
+
+def encode.ops(~A: Data, ~X: Type, ~enc: R.Rec<A> -> X, ops: List<&2, R.Op<A>>) -> List<&1, X>:
+  match ops:
+    case Nil{}:
+      Nil{}
+    case Con{op, rest}:
+      Con{enc(R.Do{op}), encode.ops(~A, ~X, ~enc, rest)}
+
+# The journal after compaction: the snapshot of the state that ops gave from s, then the records of the ops after it.
+def compacted(~A: Data, ~X: Type, ~enc: R.Rec<A> -> X, ops: List<&2, R.Op<A>>, s: R.State<A>, more: List<&2, R.Op<A>>) -> List<&1, X>:
+  Con{enc(R.Snap{live(~A, ops, s)}), encode.ops(~A, ~X, ~enc, more)}
+
+# Replaying a snapshot of live(ops, s) and then more gives live(more, live(ops, s)), whatever state the replay starts from.
+law replay_snapshot:
+  for ~A: Data
+  for ~X: Type
+  for ~enc: R.Rec<A> -> X
+  for ~dec: X -> Maybe<&2, R.Rec<A>>
+  for ~round: @r: R.Rec<A> -> {dec(enc(r)) == Some{r} : Maybe<&2, R.Rec<A>>}
+  for +ops: List<&2, R.Op<A>>
+  for +s: R.State<A>
+  for more: List<&2, R.Op<A>>
+  for t: R.State<A>
+  {restore.from(~A, ~X, ~dec, compacted(~A, ~X, ~enc, ops, s, more), Some{t}) == Some{live(~A, more, live(~A, ops, s))} : Maybe<&2, R.State<A>>}
+
 # ---- a finished ticket is never selected again
 
 def selected(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>) -> Maybe<&2, Q.Ticket<A>>:

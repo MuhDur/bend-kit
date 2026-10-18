@@ -31,6 +31,21 @@ def Laws.replay_live(A, X, enc, dec, round, ops, s):
 def Laws.replay_prefix(A, X, enc, dec, round, ops, k, s):
   replay.go(~A, ~X, ~enc, ~dec, ~round, List.take(&2, R.Op<A>, ops, k), s)
 
+# ---- compaction
+
+def restore.go(~A: Data, ~X: Type, ~enc: R.Rec<A> -> X, ~dec: X -> Maybe<&2, R.Rec<A>>, ~round: @r: R.Rec<A> -> {dec(enc(r)) == Some{r} : Maybe<&2, R.Rec<A>>},
+    more: List<&2, R.Op<A>>, s: R.State<A>) -> {Laws.restore.from(~A, ~X, ~dec, Laws.encode.ops(~A, ~X, ~enc, more), Some{s}) == Some{Laws.live(~A, more, s)} : Maybe<&2, R.State<A>>}:
+  match more:
+    case Nil{}:
+      {==}
+    case Con{+op, rest}:
+      %Equal.sym(Maybe<&2, R.Rec<A>>, dec(enc(R.Do{op})), Some{R.Do{op}}, round(R.Do{op})) : {Laws.restore.from(~A, ~X, ~dec, Laws.encode.ops(~A, ~X, ~enc, rest), R.load.rec(~A, _, s)) == Some{Laws.live(~A, rest, R.step(~A, s, op))} : Maybe<&2, R.State<A>>}
+      restore.go(~A, ~X, ~enc, ~dec, ~round, rest, R.step(~A, s, op))
+
+def Laws.replay_snapshot(A, X, enc, dec, round, ops, s, more, t):
+  %Equal.sym(Maybe<&2, R.Rec<A>>, dec(enc(R.Snap{Laws.live(~A, ops, s)})), Some{R.Snap{Laws.live(~A, ops, s)}}, round(R.Snap{Laws.live(~A, ops, s)})) : {Laws.restore.from(~A, ~X, ~dec, Laws.encode.ops(~A, ~X, ~enc, more), R.load.rec(~A, _, t)) == Some{Laws.live(~A, more, Laws.live(~A, ops, s))} : Maybe<&2, R.State<A>>}
+  restore.go(~A, ~X, ~enc, ~dec, ~round, more, Laws.live(~A, ops, s))
+
 # ---- retry
 
 def Laws.requeue_wait(A, o, p, b, id, n, now, r, w, e):
