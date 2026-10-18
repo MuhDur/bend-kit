@@ -4,3 +4,4 @@
 0x6c784a08486e2e02415e89c5249e9e8a  # tty: bend-kit-unicode by hash, until tty releases (#456)
 bend-kit-json@0.6.0.0               # waiting on the json 0.6.1.1 re-pin (#478)
 bend-kit-http@0.34.0.0              # waiting on the http 0.35.0.0 re-pin (#478)
+bend-kit-hairpin@0.7.0.0            # waiting on the hairpin 0.8.0.0 re-pin (#478)
