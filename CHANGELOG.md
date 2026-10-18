@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `camber` 0.10.0.0, `jwt` 0.6.0.0, `llm` 0.7.0.0, `oauth2` 0.6.0.0, `sigv4` 0.6.0.0, `webhooks` 0.6.0.0: import `http` 0.34.0.0, and all but `camber` import `hairpin` 0.7.0.0, so `Hairpin.open.as` honors the client's redirect mode, jar, and certificate, and a program with `hairpin` 0.7.0.0 carries one version of the `http` C effects. Breaking: `Http` and `Hairpin` types come from those versions.
 - `gateway` 0.2.0.0: imports `cache` 0.2.0.0 and `collections` 0.1.3.0. Its one-key cache proofs use the published `order_string_refl` in place of a local proof about `key.cmp`. Breaking: `Gate` holds a `cache` 0.2.0.0 `Cache`.
 - `cache` 0.2.0.0, `sigv4` 0.5.0.1: order `String` keys with `Order.string` from `bend-kit-collections@0.1.3.0`. `cache` proves that `start`, `complete`, `invalidate`, and `evict` on one key leave every other key's slot as it was, and that every operation keeps the slots a search tree. Breaking for `cache`: `key.cmp` is gone, and `Cache` holds a `collections` 0.1.3.0 `OMap`.
 - `collections` 0.1.3.0: `order.bend` adds `Order.string`, a code-point order on strings that does not rebuild them. Proved: it is reflexive, antisymmetric, transitive, and EQ means equal strings, so it meets the `OMap` laws. `LAWS.bend` and `PROOF.bend` now publish with the package, so dependent packages can cite the `OMap` and `Order` laws.
