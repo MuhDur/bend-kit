@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Compile and run check.bend for packages that ship C effects.
+# Compile and run check.bend for packages that ship C effects, and for webhooks:
+# it links hairpin, http, and time from the hub, so its build fails if two
+# versions of one C effect slip in (bendlang/bend#1533).
 # One package at a time: do not fan this out.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -11,7 +13,7 @@ trap cleanup EXIT
 shopt -s nullglob
 for d in "$@"; do
   cs=("$d"/effs/*.c)
-  [ ${#cs[@]} -eq 0 ] && continue
+  [ ${#cs[@]} -eq 0 ] && [ "$d" != webhooks ] && continue
   [ -f "$d/check.bend" ] || { echo "$d has C effects but no check.bend" >&2; exit 1; }
   echo "== native $d"
   out=$(mktemp -d)

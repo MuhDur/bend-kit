@@ -8,7 +8,7 @@ The kit is in alpha. Breaking a public API is fine: change types, rename defs, a
 
 Work on a branch off `main` and open a pull request. Do not publish to the hub by hand. CI publishes a package that passes its checks.
 
-A change to `<pkg>.bend` or `effs/` must raise `VERSION`. `scripts/publish.sh --check` fails a pull request that does not. A publish is permanent, so do not rename or move a published package's folder.
+A change to `<pkg>.bend` or `effs/` must raise `VERSION`. `scripts/publish.sh --check` fails a pull request that does not. A publish is permanent, so do not rename or move a published package's folder. Import a sibling by name at its current `VERSION`; `scripts/pins.sh` fails a pull request that does not.
 
 ```sh
 scripts/check.sh bytes http   # the packages you changed
