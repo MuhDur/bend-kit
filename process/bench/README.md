@@ -12,7 +12,7 @@ There is no fixed benchmark input. An OS process measurement depends on the comm
 
 ## Versions
 
-Package: `bend-kit-process@0.3.0.0`. Sibling: `bend-kit-bytes@0.3.2.0`. No compiler or runtime version was measured for this benchmark.
+Package: `bend-kit-process@0.4.0.0`. Sibling: `bend-kit-bytes@0.3.2.0`. No compiler or runtime version was measured for this benchmark.
 
 ## Results
 
