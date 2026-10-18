@@ -1,6 +1,6 @@
 import Base
 import ./jwt.bend as Jwt
-import bend-kit-json@0.6.0.0/json.bend as Json
+import bend-kit-json@0.6.1.1/json.bend as Json
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 # Signatures need libcrypto, so they run here: RFC 7515 A.1-A.3 verify, sign round trips, and rejections.
