@@ -5,3 +5,5 @@
 bend-kit-json@0.6.0.0               # waiting on the json 0.6.1.1 re-pin (#478)
 bend-kit-http@0.34.0.0              # waiting on the http 0.35.0.0 re-pin (#478)
 bend-kit-hairpin@0.7.0.0            # waiting on the hairpin 0.8.0.0 re-pin (#478)
+bend-kit-camber@0.10.0.0            # camber examples, authz, gateway: waiting on the camber 0.11.0.0 re-pin (#478)
+bend-kit-webhooks@0.6.0.0           # runner/example.bend: waiting on the webhooks 0.7.0.0 re-pin (#478)

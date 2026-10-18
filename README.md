@@ -36,9 +36,9 @@ Each package has `LAWS.bend` and `PROOF.bend`. In that folder, `bend PROOF.bend`
 
 Import the version the callee imports when you pass it a value. The newest folder version is often a different type. Each package README names the pins in its entry file.
 
-`http@0.34.0.0` imports its siblings by name: `wire@0.4.6.1`, `http2@0.3.0.0`, `bytes@0.3.2.0`, `time@0.2.0.0`, `int@0.2.0.0`, `concurrency@0.2.0.0`, `url@0.4.1.0`, `encoding@0.4.0.0`, `json@0.6.0.0`, `dns@0.6.0.2`, and `zlib@0.3.0.0`. `Http.Body` is `bend-kit-bytes@0.3.2.0`.
+`http@0.35.0.0` imports its siblings by name: `wire@0.4.6.1`, `http2@0.3.0.0`, `bytes@0.3.2.0`, `time@0.2.0.0`, `int@0.2.0.0`, `concurrency@0.2.0.0`, `url@0.4.1.0`, `encoding@0.4.0.0`, `json@0.6.1.1`, `dns@0.6.0.2`, and `zlib@0.3.0.0`. `Http.Body` is `bend-kit-bytes@0.3.2.0`.
 
-`hairpin@0.7.0.0`, `camber@0.10.0.0`, `jwt@0.6.0.0`, `llm@0.7.0.0`, `oauth2@0.6.0.0`, `sigv4@0.6.0.0`, and `webhooks@0.6.0.0` import `bend-kit-http@0.34.0.0`, and all but `camber` import `bend-kit-hairpin@0.7.0.0`. A program that uses these versions together carries one copy of each C effect.
+`hairpin@0.8.0.0`, `camber@0.11.0.0`, `jwt@0.7.0.0`, `llm@0.8.0.0`, `oauth2@0.7.0.0`, `sigv4@0.7.0.0`, and `webhooks@0.7.0.0` import `bend-kit-http@0.35.0.0`, and all but `camber` import `bend-kit-hairpin@0.8.0.0`. A program that uses these versions together carries one copy of each C effect.
 
 ## Native libraries
 
@@ -116,11 +116,11 @@ Each package README has the import, one example, and the limits that change the 
 | Package | Import | What it does |
 |---|---|---|
 | [`crypto`](crypto) | `bend-kit-crypto@0.2.2.1/crypto.bend` | Digests, HMAC, HKDF, AEAD, scrypt, RSA, and P-256 through OpenSSL 3. |
-| [`oauth2`](oauth2) | `bend-kit-oauth2@0.6.0.0/oauth2.bend` | Client credentials, refresh, and authorization code with PKCE. |
+| [`oauth2`](oauth2) | `bend-kit-oauth2@0.7.0.0/oauth2.bend` | Client credentials, refresh, and authorization code with PKCE. |
 | [`authz`](authz) | `bend-kit-authz@0.1.0.0/authz.bend` | Pure authorization policies: deny-overrides, default deny, intersection, and fail-closed missing context. |
-| [`jwt`](jwt) | `bend-kit-jwt@0.6.0.0/jwt.bend` | HS256/384/512, RS256, and ES256, plus JWKS lookup. |
-| [`sigv4`](sigv4) | `bend-kit-sigv4@0.6.0.0/sigv4.bend` | AWS Signature V4 and S3 over `hairpin`. |
-| [`webhooks`](webhooks) | `bend-kit-webhooks@0.6.0.0/webhooks.bend` | Standard Webhooks, Stripe, and GitHub signature checks. |
+| [`jwt`](jwt) | `bend-kit-jwt@0.7.0.0/jwt.bend` | HS256/384/512, RS256, and ES256, plus JWKS lookup. |
+| [`sigv4`](sigv4) | `bend-kit-sigv4@0.7.0.0/sigv4.bend` | AWS Signature V4 and S3 over `hairpin`. |
+| [`webhooks`](webhooks) | `bend-kit-webhooks@0.7.0.0/webhooks.bend` | Standard Webhooks, Stripe, and GitHub signature checks. |
 
 ### Programs
 
@@ -151,13 +151,13 @@ Each package README has the import, one example, and the limits that change the 
 | [`sqlite`](sqlite) | `bend-kit-sqlite@0.1.0.1/sqlite.bend` | Prepared statements through libsqlite3. |
 | [`postgres`](postgres) | `bend-kit-postgres@0.1.0.2/postgres.bend` | Postgres protocol 3.0, SCRAM-SHA-256, and a pool. |
 | [`redis`](redis) | `bend-kit-redis@0.1.0.2/redis.bend` | Redis and Valkey over RESP3, with pipelining and a pool. |
-| [`llm`](llm) | `bend-kit-llm@0.7.0.0/llm.bend` | Anthropic Messages and OpenAI Chat Completions, including SSE. |
+| [`llm`](llm) | `bend-kit-llm@0.8.0.0/llm.bend` | Anthropic Messages and OpenAI Chat Completions, including SSE. |
 
 ### Applications
 
 | Package | Import | What it does |
 |---|---|---|
-| [`camber`](camber) | `bend-kit-camber@0.10.0.0/camber.bend` | Prepared HTTP applications, typed inputs, and bounded dependency owners. |
+| [`camber`](camber) | `bend-kit-camber@0.11.0.0/camber.bend` | Prepared HTTP applications, typed inputs, and bounded dependency owners. |
 | [`gateway`](gateway) | `bend-kit-gateway@0.2.0.0/gateway.bend` | A guarded read-through gateway: authorize, admit, serve from cache, and fetch on a miss, with proofs that every path gives its unit back. `app.bend` is the Camber app. |
 
 For TOML 1.0, use [Emerging-Patterns/eztoml](https://github.com/Emerging-Patterns/eztoml) (`0xd79254973edee82bcf56616220876efe/main.bend`, v0.5.0). For CLI arguments, use [shake](https://github.com/Emerging-Patterns/shake).
