@@ -28,24 +28,20 @@ def wait_bend():
 
 
 def parse(text):
-    """-> (ms, checksum, pending/next). Baselines print `replay ms chk n`; Bend prints chk, n, then ms."""
-    ms = chk = n = None
+    """-> {op: (ms, checksum, pending/next)}. Baselines print `replay ms chk n`; Bend prints chk, n, then ms per op."""
+    got = {}
     for line in text.splitlines():
         p = line.split("\t")
-        if len(p) == 3 and p[0] == "chk":
-            chk = p[2]
-        elif len(p) == 3 and p[0] == "n":
-            n = p[2]
-        elif len(p) == 3 and p[0] == "ms":
-            ms = float(p[2])
+        if len(p) == 3 and p[0] in ("chk", "n", "ms"):
+            got.setdefault(p[1], {})[p[0]] = float(p[2]) if p[0] == "ms" else p[2]
         elif len(p) == 4 and p[0] == "replay":
-            ms, chk, n = float(p[1]), p[2], p[3]
-    return ms, chk, n
+            got[p[0]] = {"ms": float(p[1]), "chk": p[2], "n": p[3]}
+    return {op: (d.get("ms"), d.get("chk"), d.get("n")) for op, d in got.items()}
 
 
 def main():
     OUT.mkdir(exist_ok=True)
-    times, checks = {}, {}
+    times, checks = {}, set()
     for name, (build, run) in VARIANTS.items():
         if name == "Bend":
             wait_bend()
@@ -57,22 +53,26 @@ def main():
             if r.returncode != 0:
                 sys.exit(f"{name} failed:\n{r.stderr or r.stdout}")
             got = parse(r.stdout)
-            if None in got:
+            if not got or any(None in v for v in got.values()):
                 sys.exit(f"{name} printed no result:\n{r.stdout}")
             runs.append(got)
-        if len({(c, n) for _, c, n in runs}) != 1:
-            sys.exit(f"{name} checksum changed between runs: {runs}")
-        times[name] = statistics.median(ms for ms, _, _ in runs)
-        checks[name] = (runs[0][1], runs[0][2])
+        for op in runs[0]:
+            if len({(g[op][1], g[op][2]) for g in runs}) != 1:
+                sys.exit(f"{name} {op} checksum changed between runs: {runs}")
+            times[(op, name)] = statistics.median(g[op][0] for g in runs)
+            checks.add(runs[0][op][1:])
         print(f"ran {name}", file=sys.stderr)
 
-    if len(set(checks.values())) != 1:
+    if len(checks) != 1:
         sys.exit(f"checksum mismatch: {checks}")
+    names = list(VARIANTS)
     best = min(times.values()) or 0.001
-    print("| op | " + " | ".join(times) + " |")
-    print("|---|" + "---:|" * len(times))
-    print("| replay | " + " | ".join(f"{t:,.1f} ({t / best:.1f}x)" for t in times.values()) + " |")
-    chk, n = next(iter(checks.values()))
+    print("| op | " + " | ".join(names) + " |")
+    print("|---|" + "---:|" * len(names))
+    for op in dict.fromkeys(op for op, _ in times):
+        cells = [f"{times[(op, n)]:,.1f} ({times[(op, n)] / best:.1f}x)" if (op, n) in times else "-" for n in names]
+        print(f"| {op} | " + " | ".join(cells) + " |")
+    chk, n = next(iter(checks))
     print()
     print(f"checksum: {chk}, pending/next: {n}")
 

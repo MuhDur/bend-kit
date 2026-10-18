@@ -113,7 +113,7 @@ def serve(ks: List<&2, Bool>, l: Listener) -> IO(Unit):
 # ---- the runner
 
 def config() -> R.Config:
-  R.Config{Retry.Policy{4n, 1n, 50, None{}}, Retry.Circuit{5n, 60000n, 1000n, 1n}, 5}
+  R.Config{Retry.Policy{4n, 1n, 50, None{}}, Retry.Circuit{5n, 60000n, 1000n, 1n}, 5, 0}
 
 def enq.got(y: R.Runner<Hook> & R.Out(Nat)) -> IO(R.Runner<Hook>):
   match y:

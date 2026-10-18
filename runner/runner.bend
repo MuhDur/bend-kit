@@ -8,6 +8,7 @@ import bend-kit-retry@0.1.0.0/retry.bend as Retry
 import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-collections@0.1.2.0/heap.bend as H
 import bend-kit-collections@0.1.2.0/omap.bend as O
+import bend-kit-files@0.2.0.0/files.bend as Files
 
 # One queue transition. Each one is one journal record, appended before the state changes.
 # Select: the queue's select at now. Replay runs it at the same now, so it takes the same ticket.
@@ -110,6 +111,29 @@ def apply(~A: Data, ~R: Type, ~dec: R -> Maybe<&2, Op<A>>, acc: Maybe<&2, State<
       None{}
     case Some{s}:
       apply.op(~A, dec(r), s)
+
+# A journal record. Compaction writes one Snap of the whole state; every other record is one op.
+type Rec<-A: Data> is Data:
+  Snap{state: State<A>}
+  Do{op: Op<A>}
+
+def load.rec(~A: Data, m: Maybe<&2, Rec<A>>, s: State<A>) -> Maybe<&2, State<A>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{Snap{t}}:
+      Some{t}
+    case Some{Do{op}}:
+      Some{step(~A, s, op)}
+
+# Folds one record into the replayed state: a Snap replaces it, and an op steps it, as apply does.
+# A record that does not decode ends the replay with None.
+def load(~A: Data, ~R: Type, ~dec: R -> Maybe<&2, Rec<A>>, acc: Maybe<&2, State<A>>, r: R) -> Maybe<&2, State<A>>:
+  match acc:
+    case None{}:
+      None{}
+    case Some{s}:
+      load.rec(~A, dec(r), s)
 
 # ---- pool
 
@@ -297,15 +321,263 @@ def decode(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, b: Bytes.Bytes) -> Mayb
   Bytes.Bytes{+len, buf} = b
   decode.len(~A, ~pdec, U32.is_ge(len, 12), len, Bytes.Bytes{len, buf})
 
+# ---- the snapshot codec: tag 7 and the next id, then the heap, the running list, and the tries.
+# A u32 flag starts each tree node and list cell (1) and marks each end (0), so decode rebuilds the same shape.
+# A ticket is its u64 id and deadline, then a u32 length and the payload.
+
+def snap.u32(out: Bytes.Bytes, +v: U32) -> Bytes.Bytes:
+  Bytes.append(out, Bytes.set.u32le(Bytes.new(4), 0, v))
+
+def snap.u64(out: Bytes.Bytes, +n: Nat) -> Bytes.Bytes:
+  Bytes.append(out, put.u64(Bytes.new(8), 0, n))
+
+def snap.payload(out: Bytes.Bytes, p: Bytes.Bytes) -> Bytes.Bytes:
+  Bytes.Bytes{+len, buf} = p
+  Bytes.append(snap.u32(out, len), Bytes.Bytes{len, buf})
+
+def snap.ticket(~A: Data, ~penc: A -> Bytes.Bytes, out: Bytes.Bytes, t: Q.Ticket<A>) -> Bytes.Bytes:
+  Q.Ticket{+i, +d, x} = t
+  snap.payload(snap.u64(snap.u64(out, i), d), penc(x))
+
+def snap.heap(~A: Data, ~penc: A -> Bytes.Bytes, h: H.Heap<Q.Ticket<A>>, out: Bytes.Bytes) -> Bytes.Bytes:
+  match h:
+    case H.HLeaf{}:
+      snap.u32(out, 0)
+    case H.HNode{+n, t, l, r}:
+      snap.heap(~A, ~penc, r, snap.heap(~A, ~penc, l, snap.ticket(~A, ~penc, snap.u64(snap.u32(out, 1), n), t)))
+
+def snap.run(~A: Data, ~penc: A -> Bytes.Bytes, xs: List<&2, Q.Ticket<A>>, out: Bytes.Bytes) -> Bytes.Bytes:
+  match xs:
+    case Nil{}:
+      snap.u32(out, 0)
+    case Con{t, rest}:
+      snap.run(~A, ~penc, rest, snap.ticket(~A, ~penc, snap.u32(out, 1), t))
+
+def snap.tries(ts: Tries(), out: Bytes.Bytes) -> Bytes.Bytes:
+  match ts:
+    case O.OTip{}:
+      snap.u32(out, 0)
+    case O.OBin{+n, +k, Try{+f, +st}, lo, hi}:
+      snap.tries(hi, snap.tries(lo, snap.u64(snap.u64(snap.u64(snap.u32(snap.u32(out, 1), n), k), f), st)))
+
+# The Snap record of s.
+def encode.snap(~A: Data, ~penc: A -> Bytes.Bytes, s: State<A>) -> Bytes.Bytes:
+  State{Q.State{+n, h, run}, ts} = s
+  snap.tries(ts, snap.run(~A, ~penc, run, snap.heap(~A, ~penc, h, snap.u64(snap.u32(Bytes.new(0), 7), n))))
+
+def encode.rec(~A: Data, ~penc: A -> Bytes.Bytes, r: Rec<A>) -> Bytes.Bytes:
+  match r:
+    case Snap{s}:
+      encode.snap(~A, ~penc, s)
+    case Do{op}:
+      encode(~A, ~penc, op)
+
+# A snapshot reader: the record, and the offset of the next field.
+type Rd is Type:
+  Rd{b: Bytes.Bytes, at: U32}
+
+# One step of the snapshot decoder. None: a field runs past the record or does not decode.
+def Dec(-T: Type) -> Type:
+  Rd -> Maybe<&1, Rd & T>
+
+def Dec.next(-A: Type, -B: Type, m: Maybe<&1, Rd & A>, f: A -> Dec(B)) -> Maybe<&1, Rd & B>:
+  match m:
+    case None{}:
+      None{}
+    case Some{(r, x)}:
+      f(x)(r)
+
+def Dec.bind(-A: Type, -B: Type, m: Dec(A), f: A -> Dec(B)) -> Dec(B):
+  r => Dec.next(A, B, m(r), f)
+
+def Dec.pure(-A: Type, x: A) -> Dec(A):
+  r => Some{(r, x)}
+
+def Dec.fail(-A: Type) -> Dec(A):
+  r => None{}
+
+def rd.u32.of(m: Maybe<&2, U32>, b: Bytes.Bytes, +at: U32) -> Maybe<&1, Rd & U32>:
+  match m:
+    case None{}:
+      None{}
+    case Some{x}:
+      Some{(Rd{b, (at + 4 : U32)}, x)}
+
+def rd.u32.got(+at: U32, r: Bytes.Bytes & Maybe<&2, U32>) -> Maybe<&1, Rd & U32>:
+  (b, m) = r
+  rd.u32.of(m, b, at)
+
+def rd.u32.at(r: Rd) -> Maybe<&1, Rd & U32>:
+  Rd{b, +at} = r
+  rd.u32.got(at, Bytes.get.u32le(b, at))
+
+def rd.u32() -> Dec(U32):
+  r => rd.u32.at(r)
+
+def rd.u64.of(+lo: U32, +hi: U32) -> Nat:
+  Nat.add(U32.to_nat(lo), Nat.mul(U32.to_nat(hi), W()))
+
+def rd.u64() -> Dec(Nat):
+  do Dec<Nat>:
+    lo : U32 <- rd.u32()
+    hi : U32 <- rd.u32()
+    return rd.u64.of(lo, hi)
+
+def rd.cut.got(+at: U32, +n: U32, r: Bytes.Bytes & Bytes.Bytes) -> Maybe<&1, Rd & Bytes.Bytes>:
+  (b, p) = r
+  Some{(Rd{b, (at + n : U32)}, p)}
+
+def rd.cut.if(ok: Bool, b: Bytes.Bytes, +at: U32, +n: U32) -> Maybe<&1, Rd & Bytes.Bytes>:
+  match ok:
+    case False{}:
+      None{}
+    case True{}:
+      rd.cut.got(at, n, Bytes.slice(b, at, n))
+
+def rd.cut.at(+n: U32, r: Rd) -> Maybe<&1, Rd & Bytes.Bytes>:
+  Rd{Bytes.Bytes{+len, buf}, +at} = r
+  rd.cut.if(Bytes.fits(len, at, n), Bytes.Bytes{len, buf}, at, n)
+
+# The next n octets.
+def rd.cut(+n: U32) -> Dec(Bytes.Bytes):
+  r => rd.cut.at(n, r)
+
+def rd.flag.of(+m: U32) -> Dec(Bool):
+  Bool.pick(Dec(Bool), U32.is_eq(m, 0), Dec.pure(Bool, False{}), Bool.pick(Dec(Bool), U32.is_eq(m, 1), Dec.pure(Bool, True{}), Dec.fail(Bool)))
+
+# A u32 flag: 1 is True, 0 is False, and any other value fails.
+def rd.flag() -> Dec(Bool):
+  Dec.bind(U32, Bool, rd.u32(), m => rd.flag.of(m))
+
+def rd.payload(-A: Data, +i: Nat, +d: Nat, m: Maybe<&2, A>) -> Dec(Q.Ticket<A>):
+  match m:
+    case None{}:
+      Dec.fail(Q.Ticket<A>)
+    case Some{x}:
+      Dec.pure(Q.Ticket<A>, Q.Ticket{i, d, x})
+
+def rd.ticket(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>) -> Dec(Q.Ticket<A>):
+  do Dec<Q.Ticket<A>>:
+    i : Nat <- rd.u64()
+    d : Nat <- rd.u64()
+    n : U32 <- rd.u32()
+    p : Bytes.Bytes <- rd.cut(n)
+    rd.payload(A, i, d, pdec(p))
+
+# Each rd.* tree reader takes the flag already read. fuel bounds the depth: every node holds at least one 4-octet flag.
+def rd.heap(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat, node: Bool) -> Dec(H.Heap<Q.Ticket<A>>):
+  match fuel node:
+    case 0n b:
+      Dec.fail(H.Heap<Q.Ticket<A>>)
+    case 1n+f False{}:
+      Dec.pure(H.Heap<Q.Ticket<A>>, H.HLeaf{})
+    case 1n+f True{}:
+      do Dec<H.Heap<Q.Ticket<A>>>:
+        n : Nat <- rd.u64()
+        t : Q.Ticket<A> <- rd.ticket(~A, ~pdec)
+        lf : Bool <- rd.flag()
+        l : H.Heap<Q.Ticket<A>> <- rd.heap(~A, ~pdec, f, lf)
+        rf : Bool <- rd.flag()
+        r : H.Heap<Q.Ticket<A>> <- rd.heap(~A, ~pdec, f, rf)
+        return H.HNode{n, t, l, r}
+
+def rd.run(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat, more: Bool) -> Dec(List<&2, Q.Ticket<A>>):
+  match fuel more:
+    case 0n b:
+      Dec.fail(List<&2, Q.Ticket<A>>)
+    case 1n+f False{}:
+      Dec.pure(List<&2, Q.Ticket<A>>, Nil{})
+    case 1n+f True{}:
+      do Dec<List<&2, Q.Ticket<A>>>:
+        t : Q.Ticket<A> <- rd.ticket(~A, ~pdec)
+        m : Bool <- rd.flag()
+        rest : List<&2, Q.Ticket<A>> <- rd.run(~A, ~pdec, f, m)
+        return Con{t, rest}
+
+def rd.tries(+fuel: Nat, node: Bool) -> Dec(O.OMap<Nat, Try>):
+  match fuel node:
+    case 0n b:
+      Dec.fail(O.OMap<Nat, Try>)
+    case 1n+f False{}:
+      Dec.pure(O.OMap<Nat, Try>, O.OTip{})
+    case 1n+f True{}:
+      do Dec<O.OMap<Nat, Try>>:
+        n : U32 <- rd.u32()
+        k : Nat <- rd.u64()
+        fails : Nat <- rd.u64()
+        st : Nat <- rd.u64()
+        lf : Bool <- rd.flag()
+        lo : O.OMap<Nat, Try> <- rd.tries(f, lf)
+        hf : Bool <- rd.flag()
+        hi : O.OMap<Nat, Try> <- rd.tries(f, hf)
+        return O.OBin{n, k, Try{fails, st}, lo, hi}
+
+def rd.state(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat) -> Dec(State<A>):
+  do Dec<State<A>>:
+    n : Nat <- rd.u64()
+    hf : Bool <- rd.flag()
+    h : H.Heap<Q.Ticket<A>> <- rd.heap(~A, ~pdec, fuel, hf)
+    rf : Bool <- rd.flag()
+    run : List<&2, Q.Ticket<A>> <- rd.run(~A, ~pdec, fuel, rf)
+    tf : Bool <- rd.flag()
+    ts : O.OMap<Nat, Try> <- rd.tries(fuel, tf)
+    return State{Q.State{n, h, run}, ts}
+
+def decode.snap.end(-A: Data, +len: U32, m: Maybe<&1, Rd & State<A>>) -> Maybe<&2, State<A>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{(Rd{b, +at}, +s)}:
+      Bool.pick(Maybe<&2, State<A>>, U32.is_eq(at, len), Some{s}, None{})
+
+# The state of a Snap record whose tag is already checked. The decoder must end at the record's end.
+def decode.snap(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, b: Bytes.Bytes) -> Maybe<&2, State<A>>:
+  Bytes.Bytes{+len, buf} = b
+  decode.snap.end(A, len, rd.state(~A, ~pdec, U32.to_nat((len / 4 + 1 : U32)))(Rd{Bytes.Bytes{len, buf}, 4}))
+
+def decode.snapped(-A: Data, m: Maybe<&2, State<A>>) -> Maybe<&2, Rec<A>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{s}:
+      Some{Snap{s}}
+
+def decode.did(-A: Data, m: Maybe<&2, Op<A>>) -> Maybe<&2, Rec<A>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{op}:
+      Some{Do{op}}
+
+def decode.rec.if(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, snap: Bool, b: Bytes.Bytes) -> Maybe<&2, Rec<A>>:
+  match snap:
+    case True{}:
+      decode.snapped(A, decode.snap(~A, ~pdec, b))
+    case False{}:
+      decode.did(A, decode(~A, ~pdec, b))
+
+def decode.rec.tag(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, r: Bytes.Bytes & U32) -> Maybe<&2, Rec<A>>:
+  (b, +tag) = r
+  decode.rec.if(~A, ~pdec, U32.is_eq(tag, 7), b)
+
+# The Rec of a journal record, or None when it is neither a Snap nor an op that encode.rec writes.
+def decode.rec(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, b: Bytes.Bytes) -> Maybe<&2, Rec<A>>:
+  decode.rec.tag(~A, ~pdec, get.u32(Bytes.get.u32le(b, 0)))
+
 # ---- the runner
 
 # policy: retry's policy for each ticket. circuit: the breaker of each target. idle: ms that drain waits when no attempt started.
+# compact: tick compacts the journal once records past this many octets were appended since open or the last compaction; 0 never.
 type Config is Data:
-  Config{policy: Retry.Policy, circuit: Retry.Circuit, idle: U32}
+  Config{policy: Retry.Policy, circuit: Retry.Circuit, idle: U32, compact: U32}
 
-# An open runner. Its journal holds every op that made state; its pool bounds the attempts that run at once.
+# The journal, its path, its file cap, and its length at open or at the last compaction.
+type Log is Type:
+  Log{journal: J.Journal, path: String, limit: U32, base: U32}
+
+# An open runner. Replaying its journal gives its state; its pool bounds the attempts that run at once.
 type Runner<-A: Data> is Type:
-  Runner{journal: J.Journal, state: State<A>, pool: Res.Pool, breakers: Map<&2, Retry.Breaker>, config: Config}
+  Runner{log: Log, state: State<A>, pool: Res.Pool, breakers: Map<&2, Retry.Breaker>, config: Config}
 
 # An attempt that runs: its unit of the pool, the budget that admit left, its target, and the channel of its outcome.
 type Flight<-A: Data> is Type:
@@ -333,7 +605,26 @@ def first(a: Out(Unit), b: Out(Unit)) -> Out(Unit):
     case Done{u}:
       b
 
-def commit.done(~A: Data, x: J.Journal & Out(Unit), s: State<A>, +op: Op<A>, p: Res.Pool, bs: Map<&2, Retry.Breaker>, c: Config) -> Ran(A):
+def log.appended(+path: String, +limit: U32, +base: U32, x: J.Journal & Out(Unit)) -> Log & Out(Unit):
+  (j, o) = x
+  (Log{j, path, limit, base}, o)
+
+def log.append(l: Log, p: Bytes.Bytes) -> IO(Log & Out(Unit)):
+  Log{j, +path, +limit, +base} = l
+  do IO<Log & Out(Unit)>:
+    x : J.Journal & Out(Unit) <- J.append(j, p)
+    return log.appended(path, limit, base, x)
+
+def log.close(l: Log) -> IO(Unit):
+  Log{j, path, limit, base} = l
+  J.close(j)
+
+# The journal reads with limit as its record cap, so that a snapshot fits; appends keep max.
+def log.of(j: J.Journal, +max: U32, path: String, +limit: U32) -> Log:
+  J.Journal{file, cap, +end, ok} = j
+  Log{J.Journal{file, max, end, ok}, path, limit, end}
+
+def commit.done(~A: Data, x: Log & Out(Unit), s: State<A>, +op: Op<A>, p: Res.Pool, bs: Map<&2, Retry.Breaker>, c: Config) -> Ran(A):
   match x:
     case (j, Done{u}):
       (Runner{j, step(~A, s, op), p, bs, c}, Done{u})
@@ -345,11 +636,11 @@ def commit.done(~A: Data, x: J.Journal & Out(Unit), s: State<A>, +op: Op<A>, p: 
 def commit(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>, +op: Op<A>) -> IO(Ran(A)):
   Runner{j, s, p, bs, c} = r
   do IO<Ran(A)>:
-    x : J.Journal & Out(Unit) <- J.append(j, encode(~A, ~penc, op))
+    x : Log & Out(Unit) <- log.append(j, encode(~A, ~penc, op))
     return commit.done(~A, x, s, op, p, bs, c)
 
 # A grant of this runner's pool always fits it, so Kept does not happen.
-def release.got(-A: Data, x: Res.Release, j: J.Journal, s: State<A>, bs: Map<&2, Retry.Breaker>, c: Config) -> Runner<A>:
+def release.got(-A: Data, x: Res.Release, j: Log, s: State<A>, bs: Map<&2, Retry.Breaker>, c: Config) -> Runner<A>:
   match x:
     case Res.Released{p}:
       Runner{j, s, p, bs, c}
@@ -368,7 +659,7 @@ def claim.held(-A: Data, y: Ran(A), g: Res.Grant, fs: List<&1, Flight<A>>, next:
       next(release(A, r, g), fs)
 
 def claim.go(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +now: Nat, a: Retry.Breaker & Retry.Budget & Retry.Gate, +key: String,
-    j: J.Journal, s: State<A>, p: Res.Pool, bs: Map<&2, Retry.Breaker>, c: Config, +id: Nat, d: Nat, +x: A, g: Res.Grant,
+    j: Log, s: State<A>, p: Res.Pool, bs: Map<&2, Retry.Breaker>, c: Config, +id: Nat, d: Nat, +x: A, g: Res.Grant,
     fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   match a:
     case (+br, b, Retry.GateGo{}):
@@ -381,17 +672,17 @@ def claim.go(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +
         claim.held(A, y, g, fs, next)
 
 def claim.gate(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +now: Nat, got: Map<&2, Retry.Breaker> & Retry.Breaker, +key: String,
-    j: J.Journal, +s: State<A>, p: Res.Pool, +c: Config, +id: Nat, d: Nat, +x: A, g: Res.Grant,
+    j: Log, +s: State<A>, p: Res.Pool, +c: Config, +id: Nat, d: Nat, +x: A, g: Res.Grant,
     fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   (bs, br) = got
-  Config{pol, circ, idle} = c
+  Config{pol, circ, idle, every} = c
   claim.go(~A, ~penc, ~work, now, Retry.admit(br, budget(pol, tries.get(tries(A, s), id)), now), key, j, s, p, bs, c, id, d, x, g, fs, next)
 
 # The selected ticket asks its target's breaker and its own budget for an attempt.
 def claim.admit(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, r: Runner<A>, t: Q.Ticket<A>, g: Res.Grant,
     fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   Runner{j, s, p, bs, +c} = r
-  Config{pol, circ, idle} = c
+  Config{pol, circ, idle, every} = c
   Q.Ticket{id, d, +x} = t
   +key = target(x)
   claim.gate(~A, ~penc, ~work, now, Map.get(Retry.Breaker, Retry.Breaker.new(circ), bs, key), key, j, s, p, c, id, d, x, g, fs, next)
@@ -404,7 +695,7 @@ def claim.selected(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~wor
     case (r, Done{u}):
       claim.admit(~A, ~penc, ~target, ~work, now, r, t, g, fs, next)
 
-def claim.pick(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, k: Pick<A>, j: J.Journal, s: State<A>,
+def claim.pick(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, k: Pick<A>, j: Log, s: State<A>,
     bs: Map<&2, Retry.Breaker>, c: Config, fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   match k:
     case Idle{p}:
@@ -429,7 +720,7 @@ def settle.done(-A: Data, y: Ran(A), g: Res.Grant, err: Out(Unit), next: Runner<
   next(release(A, r, g), first(err, res))
 
 def settle.br(~A: Data, ~penc: A -> Bytes.Bytes, +failed: Bool, +key: String, +now: Nat, got: Map<&2, Retry.Breaker> & Retry.Breaker, +op: Op<A>,
-    j: J.Journal, s: State<A>, p: Res.Pool, c: Config, g: Res.Grant, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
+    j: Log, s: State<A>, p: Res.Pool, c: Config, g: Res.Grant, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
   (bs, br) = got
   do IO<Ran(A)>:
     y : Ran(A) <- commit(~A, ~penc, Runner{j, s, p, Map.set(&2, Retry.Breaker, bs, key, Retry.Breaker.done(br, now, failed)), c}, op)
@@ -438,7 +729,7 @@ def settle.br(~A: Data, ~penc: A -> Bytes.Bytes, +failed: Bool, +key: String, +n
 def settle.op(~A: Data, ~penc: A -> Bytes.Bytes, +o: Retry.Outcome, b: Retry.Budget, +id: Nat, +key: String, +now: Nat, +rnd: Nat, r: Runner<A>, g: Res.Grant,
     err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
   Runner{j, +s, p, bs, +c} = r
-  Config{pol, circ, idle} = c
+  Config{pol, circ, idle, every} = c
   settle.br(~A, ~penc, Retry.failed(o), key, now, Map.get(Retry.Breaker, Retry.Breaker.new(circ), bs, key),
     after(A, o, pol, b, id, fails(tries.get(tries(A, s), id)), now, rnd), j, s, p, c, g, err, next)
 
@@ -488,6 +779,95 @@ def pending(-A: Data, s: State<A>) -> Nat:
   State{Q.State{n, h, run}, ts} = s
   H.Heap.size(Q.Ticket<A>, h)
 
+# ---- compaction
+
+# Kept: compaction failed before the rename, and the old journal stands.
+# Lost: the rename happened, but the new journal did not open. Moved: the journal at path is the snapshot.
+type Swap is Type:
+  Kept{err: U32 & String}
+  Lost{err: U32 & String}
+  Moved{journal: J.Journal}
+
+def swap.reopened(x: Out(J.Journal & Unit)) -> Swap:
+  match x:
+    case Fail{e}:
+      Lost{e}
+    case Done{(j, u)}:
+      Moved{j}
+
+# The reopen fsyncs the directory, so the rename is durable before the next append.
+def swap.renamed(+path: String, +limit: U32, x: Out(Unit)) -> IO(Swap):
+  match x:
+    case Fail{e}:
+      IO.pure(Swap, Kept{e})
+    case Done{u}:
+      do IO<Swap>:
+        y : Out(J.Journal & Unit) <- J.open(~Unit, ~(a => b => a), path, limit, limit, Unit{})
+        return swap.reopened(y)
+
+def swap.written(+path: String, +tmp: String, +limit: U32, x: J.Journal & Out(Unit)) -> IO(Swap):
+  match x:
+    case (t, Fail{e}):
+      do IO<Swap>:
+        J.close(t)
+        return Kept{e}
+    case (t, Done{u}):
+      do IO<Swap>:
+        J.close(t)
+        y : Out(Unit) <- Files.rename(tmp, path)
+        swap.renamed(path, limit, y)
+
+def swap.opened(+path: String, +tmp: String, +limit: U32, x: Out(J.Journal & Unit), snap: Bytes.Bytes) -> IO(Swap):
+  match x:
+    case Fail{e}:
+      IO.pure(Swap, Kept{e})
+    case Done{(t, u)}:
+      do IO<Swap>:
+        y : J.Journal & Out(Unit) <- J.append(t, snap)
+        swap.written(path, tmp, limit, y)
+
+# Writes snap as the only record of path.compact, fsyncs it, and renames it over path.
+def swap(+path: String, +limit: U32, snap: Bytes.Bytes) -> IO(Swap):
+  +tmp = path ++ ".compact"
+  do IO<Swap>:
+    gone : Out(Unit) <- Files.remove(tmp)
+    x : Out(J.Journal & Unit) <- J.open(~Unit, ~(a => b => a), tmp, limit, limit, Unit{})
+    swap.opened(path, tmp, limit, x, snap)
+
+def log.stop(j: J.Journal) -> J.Journal:
+  J.Journal{file, max, end, ok} = j
+  J.Journal{file, max, end, False{}}
+
+def compact.moved(-A: Data, x: Swap, j: J.Journal, +max: U32, path: String, +limit: U32, +base: U32, s: State<A>, p: Res.Pool, bs: Map<&2, Retry.Breaker>, c: Config) ->
+    IO(Ran(A)):
+  match x:
+    case Kept{e}:
+      IO.pure(Ran(A), (Runner{Log{j, path, limit, base}, s, p, bs, c}, Fail{e}))
+    case Lost{e}:
+      IO.pure(Ran(A), (Runner{Log{log.stop(j), path, limit, base}, s, p, bs, c}, Fail{e}))
+    case Moved{k}:
+      do IO<Ran(A)>:
+        J.close(j)
+        return (Runner{log.of(k, max, path, limit), s, p, bs, c}, Done{Unit{}})
+
+def compact.if(~A: Data, ~penc: A -> Bytes.Bytes, ok: Bool, j: J.Journal, +max: U32, +path: String, +limit: U32, +base: U32, +s: State<A>, p: Res.Pool,
+    bs: Map<&2, Retry.Breaker>, c: Config) -> IO(Ran(A)):
+  match ok:
+    case False{}:
+      IO.pure(Ran(A), (Runner{Log{j, path, limit, base}, s, p, bs, c}, Fail{(5, "runner: an append failed; reopen the runner")}))
+    case True{}:
+      do IO<Ran(A)>:
+        x : Swap <- swap(path, limit, encode.snap(~A, ~penc, s))
+        compact.moved(A, x, j, max, path, limit, base, s, p, bs, c)
+
+# Writes the state as one Snap record into a new journal, fsyncs it, and renames it over the old one.
+# A crash leaves one of the two journals, and both replay to this state. After a failure the old
+# journal stands; when the failure came after the rename, appends stop until the runner is reopened.
+def compact(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>) -> IO(Ran(A)):
+  Runner{Log{j, path, limit, base}, s, p, bs, c} = r
+  J.Journal{file, +max, end, +ok} = j
+  compact.if(~A, ~penc, ok, J.Journal{file, max, end, ok}, max, path, limit, base, s, p, bs, c)
+
 def tick.ran(e: Out(Unit), b: Bool) -> Out(Bool):
   match e:
     case Fail{x}:
@@ -498,6 +878,33 @@ def tick.ran(e: Out(Unit), b: Bool) -> Out(Bool):
 def tick.done(-A: Data, y: Ran(A)) -> Runner<A> & Out(Bool):
   (r, e) = y
   (r, tick.ran(e, True{}))
+
+def tick.compacted(-A: Data, +b: Bool, y: Ran(A)) -> Runner<A> & Out(Bool):
+  (r, e) = y
+  (r, tick.ran(e, b))
+
+def tick.due(~A: Data, ~penc: A -> Bytes.Bytes, due: Bool, +b: Bool, r: Runner<A>) -> IO(Runner<A> & Out(Bool)):
+  match due:
+    case False{}:
+      IO.pure(Runner<A> & Out(Bool), (r, Done{b}))
+    case True{}:
+      do IO<Runner<A> & Out(Bool)>:
+        y : Ran(A) <- compact(~A, ~penc, r)
+        return tick.compacted(A, b, y)
+
+def tick.size(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>, +b: Bool) -> IO(Runner<A> & Out(Bool)):
+  Runner{Log{J.Journal{file, max, +end, ok}, path, limit, +base}, s, p, bs, +c} = r
+  Config{pol, circ, idle, +every} = c
+  tick.due(~A, ~penc, Bool.and(Bool.not(U32.is_eq(every, 0)), U32.is_gt((end - base : U32), every)), b,
+    Runner{Log{J.Journal{file, max, end, ok}, path, limit, base}, s, p, bs, c})
+
+# Compacts once the journal grew past Config.compact octets since open or the last compaction.
+def tick.grown(~A: Data, ~penc: A -> Bytes.Bytes, t: Runner<A> & Out(Bool)) -> IO(Runner<A> & Out(Bool)):
+  match t:
+    case (r, Fail{e}):
+      IO.pure(Runner<A> & Out(Bool), (r, Fail{e}))
+    case (r, Done{b}):
+      tick.size(~A, ~penc, r, b)
 
 def tick.settle(~A: Data, ~penc: A -> Bytes.Bytes, c: Claimed(A)) -> IO(Runner<A> & Out(Bool)):
   match c:
@@ -515,11 +922,13 @@ def tick.at(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A ->
     tick.settle(~A, ~penc, k)
 
 # One round: start an attempt for each due ticket the pool admits, wait for them all, and record each outcome.
-# Done{True} when an attempt ran. work runs on its own; target names the breaker that guards it.
+# Then compact the journal when it grew past Config.compact. Done{True} when an attempt ran.
+# work runs on its own; target names the breaker that guards it.
 def tick(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), r: Runner<A>) -> IO(Runner<A> & Out(Bool)):
   do IO<Runner<A> & Out(Bool)>:
     now : Nat <- clock()
-    tick.at(~A, ~penc, ~target, ~work, now, r)
+    t : Runner<A> & Out(Bool) <- tick.at(~A, ~penc, ~target, ~work, now, r)
+    tick.grown(~A, ~penc, t)
 
 def drain.ticked(-A: Data, +idle: U32, t: Runner<A> & Out(Bool), next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
   match t:
@@ -538,7 +947,7 @@ def drain.if(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -
       IO.pure(Ran(A), (r, Done{Unit{}}))
     case False{}:
       Runner{j, s, p, bs, +c} = r
-      Config{pol, circ, +idle} = c
+      Config{pol, circ, +idle, every} = c
       do IO<Ran(A)>:
         t : Runner<A> & Out(Bool) <- tick(~A, ~penc, ~target, ~work, Runner{j, s, p, bs, c})
         drain.ticked(A, idle, t, next)
@@ -572,35 +981,36 @@ def open.done(-A: Data, y: Ran(A)) -> IO(Out(Runner<A>)):
   match y:
     case (Runner{j, s, p, bs, c}, Fail{e}):
       do IO<Out(Runner<A>)>:
-        J.close(j)
+        log.close(j)
         return Fail{e}
     case (r, Done{u}):
       IO.pure(Out(Runner<A>), Done{r})
 
-def open.got(~A: Data, ~penc: A -> Bytes.Bytes, x: Out(J.Journal & Maybe<&2, State<A>>), c: Config, +capacity: Nat) -> IO(Out(Runner<A>)):
+def open.got(~A: Data, ~penc: A -> Bytes.Bytes, x: Out(J.Journal & Maybe<&2, State<A>>), +max: U32, path: String, +limit: U32, c: Config, +capacity: Nat) ->
+    IO(Out(Runner<A>)):
   match x:
     case Fail{e}:
       IO.pure(Out(Runner<A>), Fail{e})
     case Done{(j, None{})}:
       do IO<Out(Runner<A>)>:
         J.close(j)
-        return Fail{(22, "runner: a journal record is not a runner op")}
+        return Fail{(22, "runner: a journal record is not a runner record")}
     case Done{(j, Some{+s})}:
       do IO<Out(Runner<A>)>:
         now : Nat <- clock()
-        y : Ran(A) <- orphans(~A, ~penc, Q.running(A, queue(A, s)), now, Runner{j, s, Res.new(0n, capacity), Map.new(&2, Retry.Breaker), c}, Done{Unit{}})
+        y : Ran(A) <- orphans(~A, ~penc, Q.running(A, queue(A, s)), now, Runner{log.of(j, max, path, limit), s, Res.new(0n, capacity), Map.new(&2, Retry.Breaker), c}, Done{Unit{}})
         open.done(A, y)
 
 def replay.step(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, acc: Maybe<&2, State<A>>, b: Bytes.Bytes) -> Maybe<&2, State<A>>:
-  apply(~A, ~Bytes.Bytes, ~(y => decode(~A, ~pdec, y)), acc, b)
+  load(~A, ~Bytes.Bytes, ~(y => decode.rec(~A, ~pdec, y)), acc, b)
 
 # Opens the runner at path: replays its journal into the state, then requeues each ticket that was running.
-# capacity bounds the attempts that run at once. max caps a record's octets; limit caps the journal file.
-# Fails when the journal fails to open, or a committed record is not an op.
-def open(~A: Data, ~penc: A -> Bytes.Bytes, ~pdec: Bytes.Bytes -> Maybe<&2, A>, path: String, +max: U32, limit: U32, c: Config, +capacity: Nat) -> IO(Out(Runner<A>)):
+# capacity bounds the attempts that run at once. max caps an op record's octets; limit caps the journal file and a snapshot.
+# Fails when the journal fails to open, or a committed record is not a snapshot or an op.
+def open(~A: Data, ~penc: A -> Bytes.Bytes, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +path: String, +max: U32, +limit: U32, c: Config, +capacity: Nat) -> IO(Out(Runner<A>)):
   do IO<Out(Runner<A>)>:
-    x : Out(J.Journal & Maybe<&2, State<A>>) <- J.open(~Maybe<&2, State<A>>, ~(acc => b => replay.step(~A, ~pdec, acc, b)), path, max, limit, Some{new(A)})
-    open.got(~A, ~penc, x, c, capacity)
+    x : Out(J.Journal & Maybe<&2, State<A>>) <- J.open(~Maybe<&2, State<A>>, ~(acc => b => replay.step(~A, ~pdec, acc, b)), path, limit, limit, Some{new(A)})
+    open.got(~A, ~penc, x, max, path, limit, c, capacity)
 
 def enqueue.done(-A: Data, +id: Nat, y: Ran(A)) -> Runner<A> & Out(Nat):
   match y:
@@ -627,4 +1037,4 @@ def state(-A: Data, r: Runner<A>) -> Runner<A> & State<A>:
 
 def close(-A: Data, r: Runner<A>) -> IO(Unit):
   Runner{j, s, p, bs, c} = r
-  J.close(j)
+  log.close(j)
