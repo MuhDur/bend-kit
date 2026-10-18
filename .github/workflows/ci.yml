@@ -30,6 +30,11 @@ jobs:
           fi
           echo "packages=$(jq -Rnc '[inputs | select(length > 0)]' <<<"$pkgs")" >> "$GITHUB_OUTPUT"
           echo "http=$(grep -qx http <<<"$pkgs" && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Check sibling pins
+        if: github.event_name == 'pull_request'
+        run: |
+          pkgs=$(scripts/packages.sh "origin/${{ github.base_ref }}")
+          [ -z "$pkgs" ] || scripts/pins.sh "origin/${{ github.base_ref }}" $pkgs
 
   check:
     needs: changes
@@ -53,13 +58,6 @@ jobs:
           scripts/check.sh ${{ matrix.package }}
       - name: Native check ${{ matrix.package }}
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-          cs=(${{ matrix.package }}/effs/*.c)
-          if [ ${#cs[@]} -eq 0 ]; then
-            echo "no C effects"
-            exit 0
-          fi
           export PATH="$HOME/.bend/bin:$PATH"
           scripts/native-check.sh ${{ matrix.package }}
       - name: Install Bun for process smoke

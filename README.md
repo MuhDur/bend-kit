@@ -196,7 +196,7 @@ scripts/check.sh bytes http   # some packages
 scripts/packages.sh origin/main
 ```
 
-`check.sh` type-checks the entry file, then runs `PROOF.bend` and `check.bend`. CI checks each package a pull request changes. A change under `.github/` or `scripts/`, and each push to `main`, checks every package. A package with `effs/*.c` also runs `scripts/native-check.sh`.
+`check.sh` type-checks the entry file, then runs `PROOF.bend` and `check.bend`. CI checks each package a pull request changes. A change under `.github/` or `scripts/`, and each push to `main`, checks every package. A package with `effs/*.c`, and `webhooks`, also runs `scripts/native-check.sh`. `scripts/pins.sh` fails a pull request whose changed packages import a sibling at a version other than its `VERSION`, or by hash; `scripts/pins.allow` lists the exceptions.
 
 CI installs the Bend version pinned in `scripts/install-bend.sh`. To move to a new Bend, change `VER` and `SHA` in that script.
 
