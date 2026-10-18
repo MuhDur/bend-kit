@@ -44,7 +44,7 @@ for d in $all; do
   old=$(git show "$ref:$d/VERSION" 2>/dev/null) || continue
   new=$(<"$d/VERSION")
   [ "$old" = "$new" ] && continue
-  left=$(grep -F "import bend-kit-$d@$old/" <<<"$every" | cut -d: -f1 | sort -u)
+  left=$(grep -F "import bend-kit-$d@$old/" <<<"$every" | cut -d: -f1 | sort -u || true)
   [ -n "$left" ] || continue
   echo "$d rises $old -> $new; re-pin after it publishes:"
   sed 's/^/  /' <<<"$left"
