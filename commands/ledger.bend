@@ -39,8 +39,8 @@ def books.of(mv: Maybe<&1, Json.Val>) -> Maybe<&2, Books()>:
     case _:
       None{}
 
-def decode(s: String) -> Maybe<&2, Books()>:
-  books.of(Json.parse.strict.unique.bytes(Bytes.from_string(s), 1))
+def decode(s: Bytes.Bytes) -> Maybe<&2, Books()>:
+  books.of(Json.parse.strict.unique.bytes(s, 1))
 
 def encode.go(xs: List<&1, String & U32>) -> List<&1, Bytes.Bytes & Json.Val>:
   match xs:
@@ -50,8 +50,8 @@ def encode.go(xs: List<&1, String & U32>) -> List<&1, Bytes.Bytes & Json.Val>:
       (k, n) = kv
       Con{(Bytes.from_string(k), Json.Num{Bytes.from_string(U32.show(n))}), encode.go(rest)}
 
-def encode(m: Books()) -> String:
-  Bytes.to_string(Json.encode.bytes(Json.Obj{encode.go(O.OMap.to_list(String, U32, m))}))
+def encode(m: Books()) -> Bytes.Bytes:
+  Json.encode.bytes(Json.Obj{encode.go(O.OMap.to_list(String, U32, m))})
 
 # ---- payload: {"account":"acct_1","credit":500} or {"account":"acct_1","debit":200}
 
@@ -104,8 +104,8 @@ def payload.of(mv: Maybe<&1, Json.Val>) -> Maybe<&2, Op>:
       None{}
 
 # Strict UTF-8 JSON with unique keys. Callers send one canonical encoding per event: the bytes are the identity.
-def payload(p: String) -> Maybe<&2, Op>:
-  payload.of(Json.parse.strict.unique.bytes(Bytes.from_string(p), 1))
+def payload(p: Bytes.Bytes) -> Maybe<&2, Op>:
+  payload.of(Json.parse.strict.unique.bytes(p, 1))
 
 # ---- decide
 
@@ -116,17 +116,17 @@ def balance(m: Maybe<&2, U32>) -> U32:
     case None{}:
       0
 
-def accepted(m: Books(), +a: String, +n: U32) -> C.Decision<String, String, String>:
-  C.Accept{encode(O.OMap.put(~String, ~U32, ~String.order, m, a, n)), U32.show(n), [a ++ "=" ++ U32.show(n)]}
+def accepted(m: Books(), +a: String, +n: U32) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
+  C.Accept{encode(O.OMap.put(~String, ~U32, ~String.order, m, a, n)), Bytes.from_string(U32.show(n)), [Bytes.from_string(a ++ "=" ++ U32.show(n))]}
 
-def settle(ok: Bool, m: Books(), +a: String, +n: U32, why: String) -> C.Decision<String, String, String>:
+def settle(ok: Bool, m: Books(), +a: String, +n: U32, why: String) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   match ok:
     case True{}:
       accepted(m, a, n)
     case False{}:
-      C.Refuse{why}
+      C.Refuse{Bytes.from_string(why)}
 
-def apply(o: Op, +m: Books()) -> C.Decision<String, String, String>:
+def apply(o: Op, +m: Books()) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   match o:
     case Credit{+a, +n}:
       +b = balance(O.OMap.get(~String, ~U32, ~String.order, m, a))
@@ -136,27 +136,27 @@ def apply(o: Op, +m: Books()) -> C.Decision<String, String, String>:
       +b = balance(O.OMap.get(~String, ~U32, ~String.order, m, a))
       settle(U32.is_le(n, b), m, a, (b - n : U32), "insufficient funds")
 
-def decide.go(m: Maybe<&2, Books()>, o: Maybe<&2, Op>) -> C.Decision<String, String, String>:
+def decide.go(m: Maybe<&2, Books()>, o: Maybe<&2, Op>) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   match m o:
     case Some{b} Some{x}:
       apply(x, b)
     case None{} _:
-      C.Refuse{"state does not decode"}
+      C.Refuse{Bytes.from_string("state does not decode")}
     case Some{b} None{}:
-      C.Refuse{"invalid payload"}
+      C.Refuse{Bytes.from_string("invalid payload")}
 
 # A credit or debit of one account. The result is the new balance; the effect notifies the account holder.
-def decide(s: String, p: String) -> C.Decision<String, String, String>:
+def decide(s: Bytes.Bytes, p: Bytes.Bytes) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   decide.go(decode(s), payload(p))
 
-def outcome.show(o: C.Outcome<String>) -> String:
+def outcome.show(o: C.Outcome<Bytes.Bytes>) -> String:
   match o:
     case C.Accepted{r}:
-      "accepted " ++ r
+      "accepted " ++ Bytes.to_string(r)
     case C.Refused{r}:
-      "refused " ++ r
+      "refused " ++ Bytes.to_string(r)
 
-def reply.show(r: C.Reply<String>) -> String:
+def reply.show(r: C.Reply<Bytes.Bytes>) -> String:
   match r:
     case C.Fresh{o}:
       "fresh " ++ outcome.show(o)

@@ -1,9 +1,9 @@
 # commands benchmark
 
-This times `commands.handle`, one command in one SQLite transaction, in Bend and in C, Rust, JavaScript (Bun), and Python. No language has a standard idempotency library, so each variant runs the obvious loop over the same schema and SQL that `commands.open` creates:
+This times `commands.handle`, one command in one SQLite transaction, in Bend and in C, Rust, JavaScript (Bun), and Python. No language has a standard idempotency library, so each variant runs the obvious loop over the same schema and SQL that `commands.open` creates. The payload, state, result, and effect are BLOBs in every variant:
 
 - `BEGIN IMMEDIATE`, then `SELECT payload, kind, result, at FROM commands_seen WHERE id = ?`.
-- **Duplicate:** compare the payload, then `COMMIT`.
+- **Duplicate:** compare the payload bytes, then `COMMIT`.
 - **New command:** read the state row, add the amount, `UPDATE` the state, `INSERT` the record, `INSERT` one outbox row, then `COMMIT`.
 
 Two passes are timed:
@@ -36,7 +36,7 @@ Rust's standard library has no SQLite, so `bench.rs` links libsqlite3 directly, 
 ## Input
 
 - Command **i** (0 ≤ i < N) has id `cmd_i` and payload `(x_i >> 1) mod 1000` in decimal, with `x_0 = 1` and `x_{i+1} = x_i * 1664525 + 1013904223` in wrapping u32.
-- The domain state is a decimal total, starting at `0`. A new command adds its amount. The result is the new total, and the outbox row is `total=<new total>`.
+- The domain state is a decimal total, starting at `0`. A new command adds its amount. The result is the new total, and the outbox row is `total=<new total>`. Each is stored as the bytes of its ASCII text.
 - The `fresh` checksum is the final total, read after the timer stops. The `replay` checksum is `h = h*31 + result` in wrapping u32 over every duplicate's recorded result.
 
 With N = 10,000 the checksums are **5023800** and **1224217884**. With N = 2,000 they are **1018672** and **1045709524**. With N = 500 they are **259210** and **2276155089**.
@@ -49,22 +49,22 @@ In-memory database, N = 10,000:
 
 | variant | SQLite | fresh ms | commands/s | vs fastest | replay ms | duplicates/s | vs fastest |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| C | 3.51.0 | 38.3 | 261,274 | 1.0x | 6.7 | 1,485,443 | 1.0x |
-| Rust | 3.51.0 | 39.7 | 251,965 | 1.0x | 6.9 | 1,454,969 | 1.0x |
-| Bun | 3.51.0 | 59.2 | 169,019 | 1.5x | 12.7 | 788,457 | 1.9x |
-| Python | 3.54.0 | 73.1 | 136,790 | 1.9x | 23.7 | 421,674 | 3.5x |
-| Bend | 3.51.0 | 93.6 | 106,881 | 2.4x | 42.0 | 238,138 | 6.2x |
+| C | 3.51.0 | 40.5 | 246,853 | 1.0x | 6.5 | 1,548,467 | 1.0x |
+| Rust | 3.51.0 | 39.2 | 255,408 | 1.0x | 6.5 | 1,532,332 | 1.0x |
+| Bun | 3.51.0 | 55.6 | 179,743 | 1.4x | 13.6 | 736,865 | 2.1x |
+| Python | 3.54.0 | 73.2 | 136,562 | 1.9x | 22.5 | 443,597 | 3.5x |
+| Bend | 3.51.0 | 93.5 | 106,995 | 2.4x | 43.0 | 232,474 | 6.7x |
 
 File database, N = 2,000. Each new command's `COMMIT` waits for the disk, so `fresh` measures the disk more than the language:
 
 | variant | SQLite | fresh ms | commands/s | vs fastest | replay ms | duplicates/s | vs fastest |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| C | 3.51.0 | 1,377.0 | 1,452 | 1.0x | 22.9 | 87,527 | 1.3x |
-| Rust | 3.51.0 | 1,712.8 | 1,168 | 1.2x | 21.3 | 93,712 | 1.2x |
-| Bun | 3.51.0 | 3,367.3 | 594 | 2.4x | 17.6 | 113,785 | 1.0x |
-| Python | 3.54.0 | 4,351.3 | 460 | 3.2x | 17.6 | 113,908 | 1.0x |
-| Bend | 3.51.0 | 1,560.8 | 1,281 | 1.1x | 28.0 | 71,550 | 1.6x |
+| C | 3.51.0 | 698.0 | 2,866 | 1.0x | 13.3 | 150,410 | 1.1x |
+| Rust | 3.51.0 | 942.6 | 2,122 | 1.4x | 11.9 | 167,616 | 1.0x |
+| Bun | 3.51.0 | 792.6 | 2,523 | 1.1x | 15.3 | 130,412 | 1.3x |
+| Python | 3.54.0 | 719.8 | 2,779 | 1.0x | 13.8 | 144,467 | 1.2x |
+| Bend | 3.51.0 | 721.2 | 2,773 | 1.0x | 19.1 | 104,569 | 1.6x |
 
 Versions: Bend 2.0.37, Apple clang 17.0.0, rustc 1.91.0, Bun 1.3.14, Python 3.14.6.
 
-Bend reads the state row on a duplicate too, because `step` takes the state before it knows whether the id has a record. The other variants skip that read. Bend also builds each id and payload as a `String`, a list of `Char`, and each effect converts it at the boundary.
+Bend reads the state row on a duplicate too, because `step` takes the state before it knows whether the id has a record. The other variants skip that read. For a new command, `step` copies the payload and the result, because each goes both to its consumer and to the record. The bench's `decide` converts each decimal between `Bytes` and `String`, because `bend-kit-bytes` has no decimal parser.

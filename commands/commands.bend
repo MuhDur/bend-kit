@@ -1,40 +1,57 @@
 # Retry-safe commands: deduplicate by command id, replay recorded results, and commit state, record, and outbox in one SQLite transaction. Source: https://github.com/paymog/bend-kit/tree/main/commands
 import Base
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-sqlite@0.1.0.1/sqlite.bend as Sqlite
 
 # ---- the pure processor
 
-type Outcome<-R: Data> is Data:
+type Outcome<-R: Type> is Type:
   Accepted{result: R}
   Refused{result: R}
 
 # What the store keeps for one command id: its payload, its outcome, and when it was recorded.
-type Record<-P: Data, -R: Data> is Data:
+type Record<-P: Type, -R: Type> is Type:
   Record{payload: P, outcome: Outcome<R>, at: U32}
 
-type Reply<-R: Data> is Data:
+type Reply<-R: Type> is Type:
   Fresh{outcome: Outcome<R>}
   Replayed{outcome: Outcome<R>}
   Conflict{}
 
 # The domain's answer to a new command.
-type Decision<-S: Data, -R: Data, -E: Data> is Data:
-  Accept{state: S, result: R, effects: List<&2, E>}
+type Decision<-S: Type, -R: Type, -E: Type> is Type:
+  Accept{state: S, result: R, effects: List<E>}
   Refuse{result: R}
 
-# Write: commit the state, the record, and the effects together. Keep: write nothing.
-type Step<-S: Data, -P: Data, -R: Data, -E: Data> is Data:
-  Write{state: S, record: Record<P, R>, reply: Reply<R>, effects: List<&2, E>}
+# Write: commit the state, the record, and the effects together. Note: commit only the record. Keep: write nothing.
+type Step<-S: Type, -P: Type, -R: Type, -E: Type> is Type:
+  Write{state: S, record: Record<P, R>, reply: Reply<R>, effects: List<E>}
+  Note{record: Record<P, R>, reply: Reply<R>}
   Keep{reply: Reply<R>}
 
-def decided(-S: Data, -P: Data, -R: Data, -E: Data, d: Decision<S, R, E>, s: S, p: P, at: U32) -> Step<S, P, R, E>:
-  match d:
-    case Accept{s2, +r, es}:
-      Write{s2, Record{p, Accepted{r}, at}, Fresh{Accepted{r}}, es}
-    case Refuse{+r}:
-      Write{s, Record{p, Refused{r}, at}, Fresh{Refused{r}}, Nil{}}
+def accepted(-S: Type, -P: Type, -R: Type, -E: Type, rr: R & R, s2: S, p: P, at: U32, es: List<E>) -> Step<S, P, R, E>:
+  (r, r2) = rr
+  Write{s2, Record{p, Accepted{r}, at}, Fresh{Accepted{r2}}, es}
 
-def replayed(-R: Data, same: Bool, o: Outcome<R>) -> Reply<R>:
+def refused(-S: Type, -P: Type, -R: Type, -E: Type, rr: R & R, p: P, at: U32) -> Step<S, P, R, E>:
+  (r, r2) = rr
+  Note{Record{p, Refused{r}, at}, Fresh{Refused{r2}}}
+
+def decided(~S: Type, ~P: Type, ~R: Type, ~E: Type, ~dup_r: R -> R & R, d: Decision<S, R, E>, p: P, at: U32) -> Step<S, P, R, E>:
+  match d:
+    case Accept{s2, r, es}:
+      accepted(S, P, R, E, dup_r(r), s2, p, at, es)
+    case Refuse{r}:
+      refused(S, P, R, E, dup_r(r), p, at)
+
+def fresh(
+  ~S: Type, ~P: Type, ~R: Type, ~E: Type, ~dup_r: R -> R & R, ~decide: S -> P -> Decision<S, R, E>,
+  pp: P & P, s: S, at: U32
+) -> Step<S, P, R, E>:
+  (p, p2) = pp
+  decided(~S, ~P, ~R, ~E, ~dup_r, decide(s, p), p2, at)
+
+def replayed(-R: Type, same: Bool, o: Outcome<R>) -> Reply<R>:
   match same:
     case True{}:
       Replayed{o}
@@ -42,13 +59,14 @@ def replayed(-R: Data, same: Bool, o: Outcome<R>) -> Reply<R>:
       Conflict{}
 
 # One command, given the record that the store holds for its id and the domain state s.
+# dup_p and dup_r copy a payload and a result: a new command's payload goes to decide and to the record.
 def step(
-  ~S: Data, ~P: Data, ~R: Data, ~E: Data, ~eq: P -> P -> Bool, ~decide: S -> P -> Decision<S, R, E>,
-  found: Maybe<&2, Record<P, R>>, +s: S, +p: P, at: U32
+  ~S: Type, ~P: Type, ~R: Type, ~E: Type, ~eq: P -> P -> Bool, ~dup_p: P -> P & P, ~dup_r: R -> R & R,
+  ~decide: S -> P -> Decision<S, R, E>, found: Maybe<Record<P, R>>, s: S, p: P, at: U32
 ) -> Step<S, P, R, E>:
   match found:
     case None{}:
-      decided(S, P, R, E, decide(s, p), s, p, at)
+      fresh(~S, ~P, ~R, ~E, ~dup_r, ~decide, dup_p(p), s, at)
     case Some{Record{q, o, t}}:
       Keep{replayed(R, eq(q, p), o)}
 
@@ -114,27 +132,56 @@ def once(-A: Type, +db: U32, text: String, body: U32 -> Run(A)) -> Run(A):
 def sql(+db: U32, text: String) -> Run(Unit):
   once(Unit, db, text, +s => exec(s))
 
+def blob.of(lw: U32 & Array<U32>) -> Bytes.Bytes:
+  (n, w) = lw
+  Bytes.Bytes{n, w}
+
+def column(+s: U32, i: U32) -> Run(Bytes.Bytes):
+  do Run<Bytes.Bytes>:
+    lw : U32 & Array<U32> <- Sqlite.stmt.column.blob(s, i)
+    return blob.of(lw)
+
+def bind(+s: U32, i: U32, b: Bytes.Bytes) -> Run(Unit):
+  Bytes.Bytes{n, w} = b
+  Sqlite.stmt.bind.blob(s, i, n, w)
+
+def same.of(r: Bytes.Bytes & Bytes.Bytes & Bool) -> Bool:
+  (a, b, ok) = r
+  ok
+
+# The payload comparison that handle gives step: every byte, NUL included.
+def same(a: Bytes.Bytes, b: Bytes.Bytes) -> Bool:
+  same.of(Bytes.eq(a, b))
+
+def dup.of(+n: U32, ww: Array<U32> & Array<U32>) -> Bytes.Bytes & Bytes.Bytes:
+  (w, w2) = ww
+  (Bytes.Bytes{n, w}, Bytes.Bytes{n, w2})
+
+def dup(b: Bytes.Bytes) -> Bytes.Bytes & Bytes.Bytes:
+  Bytes.Bytes{+n, w} = b
+  dup.of(n, Array.clone(U32, w))
+
 # ---- the store
 
 # A database and its prepared statements. One Store serves one task at a time.
 type Store is Data:
   Store{db: U32, begin: U32, commit: U32, rollback: U32, find: U32, read: U32, save: U32, keep: U32, emit: U32}
 
-def init.run(+s: U32, init: String) -> Run(Unit):
+def init.run(+s: U32, init: Bytes.Bytes) -> Run(Unit):
   do Run<Unit>:
-    Sqlite.stmt.bind.text(s, 1, init)
+    bind(s, 1, init)
     exec(s)
 
 # Opens or creates the tables at path. A new database starts with domain state init.
 # wait is how many ms a write waits for another connection's transaction before it fails with SQLITE_BUSY (5).
-def open(path: String, init: String, wait: U32) -> Run(Store):
+def open(path: String, init: Bytes.Bytes, wait: U32) -> Run(Store):
   do Run<Store>:
     +db : U32 <- Sqlite.db.open(path)
     sql(db, "PRAGMA busy_timeout = " ++ U32.show(wait))
-    sql(db, "CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state TEXT NOT NULL)")
-    sql(db, "CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload TEXT NOT NULL, kind INTEGER NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL)")
+    sql(db, "CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)")
+    sql(db, "CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)")
     sql(db, "CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)")
-    sql(db, "CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect TEXT NOT NULL)")
+    sql(db, "CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)")
     once(Unit, db, "INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, ?)", +s => init.run(s, init))
     begin : U32 <- Sqlite.stmt.prepare(db, "BEGIN IMMEDIATE")
     commit : U32 <- Sqlite.stmt.prepare(db, "COMMIT")
@@ -159,111 +206,125 @@ def close(st: Store) -> Run(Unit):
     Sqlite.stmt.finalize(emit)
     Sqlite.db.close(db)
 
-def outcome(+kind: U32, +r: String) -> Outcome<String>:
-  Bool.pick(Outcome<String>, U32.is_eq(kind, 1), Accepted{r}, Refused{r})
+def outcome(accepted: Bool, r: Bytes.Bytes) -> Outcome<Bytes.Bytes>:
+  match accepted:
+    case True{}:
+      Accepted{r}
+    case False{}:
+      Refused{r}
 
-def seen.row(row: Bool, +find: U32) -> Run(Maybe<&2, Record<String, String>>):
+def seen.row(row: Bool, +find: U32) -> Run(Maybe<Record<Bytes.Bytes, Bytes.Bytes>>):
   match row:
     case False{}:
-      Run.pure(Maybe<&2, Record<String, String>>, None{})
+      Run.pure(Maybe<Record<Bytes.Bytes, Bytes.Bytes>>, None{})
     case True{}:
-      do Run<Maybe<&2, Record<String, String>>>:
-        p : String <- Sqlite.stmt.column.text(find, 0)
+      do Run<Maybe<Record<Bytes.Bytes, Bytes.Bytes>>>:
+        p : Bytes.Bytes <- column(find, 0)
         kind : U32 <- Sqlite.stmt.column.int(find, 1)
-        r : String <- Sqlite.stmt.column.text(find, 2)
+        r : Bytes.Bytes <- column(find, 2)
         at : U32 <- Sqlite.stmt.column.int(find, 3)
-        return Some{Record{p, outcome(kind, r), at}}
+        return Some{Record{p, outcome(U32.is_eq(kind, 1), r), at}}
 
 # The record for id, if the store holds one.
-def seen.get(+find: U32, id: String) -> Run(Maybe<&2, Record<String, String>>):
-  do Run<Maybe<&2, Record<String, String>>>:
+def seen.get(+find: U32, id: String) -> Run(Maybe<Record<Bytes.Bytes, Bytes.Bytes>>):
+  do Run<Maybe<Record<Bytes.Bytes, Bytes.Bytes>>>:
     Sqlite.stmt.bind.text(find, 1, id)
     row : Bool <- Sqlite.stmt.step(find)
-    m : Maybe<&2, Record<String, String>> <- seen.row(row, find)
+    m : Maybe<Record<Bytes.Bytes, Bytes.Bytes>> <- seen.row(row, find)
     Sqlite.stmt.reset(find)
     return m
 
-def state.row(row: Bool, +read: U32) -> Run(String):
+def state.row(row: Bool, +read: U32) -> Run(Bytes.Bytes):
   match row:
     case True{}:
-      Sqlite.stmt.column.text(read, 0)
+      column(read, 0)
     case False{}:
-      Run.fail(String, (1, "commands: the state row is missing"))
+      Run.fail(Bytes.Bytes, (1, "commands: the state row is missing"))
 
-def state.get(+read: U32) -> Run(String):
-  do Run<String>:
+def state.get(+read: U32) -> Run(Bytes.Bytes):
+  do Run<Bytes.Bytes>:
     row : Bool <- Sqlite.stmt.step(read)
-    s : String <- state.row(row, read)
+    s : Bytes.Bytes <- state.row(row, read)
     Sqlite.stmt.reset(read)
     return s
 
-def seen.put.row(+keep: U32, id: String, p: String, kind: U32, r: String, at: U32) -> Run(Unit):
+def seen.put.row(+keep: U32, id: String, p: Bytes.Bytes, kind: U32, r: Bytes.Bytes, at: U32) -> Run(Unit):
   do Run<Unit>:
     Sqlite.stmt.bind.text(keep, 1, id)
-    Sqlite.stmt.bind.text(keep, 2, p)
+    bind(keep, 2, p)
     Sqlite.stmt.bind.int(keep, 3, kind)
-    Sqlite.stmt.bind.text(keep, 4, r)
+    bind(keep, 4, r)
     Sqlite.stmt.bind.int(keep, 5, at)
     exec(keep)
 
-def seen.put.of(o: Outcome<String>, +keep: U32, id: String, p: String, at: U32) -> Run(Unit):
+def seen.put.of(o: Outcome<Bytes.Bytes>, +keep: U32, id: String, p: Bytes.Bytes, at: U32) -> Run(Unit):
   match o:
     case Accepted{r}:
       seen.put.row(keep, id, p, 1, r, at)
     case Refused{r}:
       seen.put.row(keep, id, p, 2, r, at)
 
-def seen.put(rec: Record<String, String>, +keep: U32, id: String) -> Run(Unit):
+def seen.put(rec: Record<Bytes.Bytes, Bytes.Bytes>, +keep: U32, id: String) -> Run(Unit):
   Record{p, o, at} = rec
   seen.put.of(o, keep, id, p, at)
 
-def outbox.put(es: List<&2, String>, +emit: U32, +id: String) -> Run(Unit):
+def outbox.put(es: List<Bytes.Bytes>, +emit: U32, +id: String) -> Run(Unit):
   match es:
     case Nil{}:
       Run.pure(Unit, Unit{})
     case Con{e, rest}:
       do Run<Unit>:
         Sqlite.stmt.bind.text(emit, 1, id)
-        Sqlite.stmt.bind.text(emit, 2, e)
+        bind(emit, 2, e)
         exec(emit)
         outbox.put(rest, emit, id)
 
-def state.put(+save: U32, s: String) -> Run(Unit):
+def state.put(+save: U32, s: Bytes.Bytes) -> Run(Unit):
   do Run<Unit>:
-    Sqlite.stmt.bind.text(save, 1, s)
+    bind(save, 1, s)
     exec(save)
 
 # Applies a step inside the open transaction, then commits it.
-def written(w: Step<String, String, String, String>, +commit: U32, +save: U32, +keep: U32, +emit: U32, +id: String) -> Run(Reply<String>):
+def written(
+  w: Step<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>, +commit: U32, +save: U32, +keep: U32, +emit: U32, +id: String
+) -> Run(Reply<Bytes.Bytes>):
   match w:
     case Write{s, rec, reply, es}:
-      do Run<Reply<String>>:
+      do Run<Reply<Bytes.Bytes>>:
         state.put(save, s)
         seen.put(rec, keep, id)
         outbox.put(es, emit, id)
         exec(commit)
         return reply
+    case Note{rec, reply}:
+      do Run<Reply<Bytes.Bytes>>:
+        seen.put(rec, keep, id)
+        exec(commit)
+        return reply
     case Keep{reply}:
-      do Run<Reply<String>>:
+      do Run<Reply<Bytes.Bytes>>:
         exec(commit)
         return reply
 
-def handle.txn(~decide: String -> String -> Decision<String, String, String>, st: Store, +id: String, payload: String, at: U32) -> Run(Reply<String>):
+def handle.txn(
+  ~decide: Bytes.Bytes -> Bytes.Bytes -> Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>,
+  st: Store, +id: String, payload: Bytes.Bytes, at: U32
+) -> Run(Reply<Bytes.Bytes>):
   Store{db, begin, commit, rollback, find, read, save, keep, emit} = st
-  do Run<Reply<String>>:
+  do Run<Reply<Bytes.Bytes>>:
     exec(begin)
-    found : Maybe<&2, Record<String, String>> <- seen.get(find, id)
-    s : String <- state.get(read)
-    written(step(~String, ~String, ~String, ~String, ~String.eq, ~decide, found, s, payload, at), commit, save, keep, emit, id)
+    found : Maybe<Record<Bytes.Bytes, Bytes.Bytes>> <- seen.get(find, id)
+    s : Bytes.Bytes <- state.get(read)
+    written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~dup, ~dup, ~decide, found, s, payload, at), commit, save, keep, emit, id)
 
 # On failure, resets the read statements and rolls back. Rollback errors are ignored: the transaction may not have started.
-def handle.end(r: Result<&1, &1, U32 & String, Reply<String>>, st: Store) -> Run(Reply<String>):
+def handle.end(r: Result<&1, &1, U32 & String, Reply<Bytes.Bytes>>, st: Store) -> Run(Reply<Bytes.Bytes>):
   match r:
     case Done{x}:
-      Run.pure(Reply<String>, x)
+      Run.pure(Reply<Bytes.Bytes>, x)
     case Fail{e}:
       Store{db, begin, commit, rollback, find, read, save, keep, emit} = st
-      do IO<Result<&1, &1, U32 & String, Reply<String>>>:
+      do IO<Result<&1, &1, U32 & String, Reply<Bytes.Bytes>>>:
         a : Result<&1, &1, U32 & String, Unit> <- Sqlite.stmt.reset(find)
         b : Result<&1, &1, U32 & String, Unit> <- Sqlite.stmt.reset(read)
         c : Result<&1, &1, U32 & String, Unit> <- exec(rollback)
@@ -271,13 +332,16 @@ def handle.end(r: Result<&1, &1, U32 & String, Reply<String>>, st: Store) -> Run
 
 # Runs one command in one transaction: find its record, decide, and commit state, record, and effects.
 # at is the record's time for prune, in seconds. decide sees the committed state and the payload.
-def handle(~decide: String -> String -> Decision<String, String, String>, +st: Store, id: String, payload: String, at: U32) -> Run(Reply<String>):
-  do IO<Result<&1, &1, U32 & String, Reply<String>>>:
-    r : Result<&1, &1, U32 & String, Reply<String>> <- handle.txn(~decide, st, id, payload, at)
+def handle(
+  ~decide: Bytes.Bytes -> Bytes.Bytes -> Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>,
+  +st: Store, id: String, payload: Bytes.Bytes, at: U32
+) -> Run(Reply<Bytes.Bytes>):
+  do IO<Result<&1, &1, U32 & String, Reply<Bytes.Bytes>>>:
+    r : Result<&1, &1, U32 & String, Reply<Bytes.Bytes>> <- handle.txn(~decide, st, id, payload, at)
     handle.end(r, st)
 
 # The committed domain state.
-def state(st: Store) -> Run(String):
+def state(st: Store) -> Run(Bytes.Bytes):
   Store{db, begin, commit, rollback, find, read, save, keep, emit} = st
   state.get(read)
 
@@ -292,29 +356,29 @@ def prune(st: Store, before: U32) -> Run(Unit):
   once(Unit, db, "DELETE FROM commands_seen WHERE at < ?", +s => prune.run(s, before))
 
 # An undelivered effect: its sequence number, its command id, and the effect.
-type Pending is Data:
-  Pending{seq: U32, id: String, effect: String}
+type Pending is Type:
+  Pending{seq: U32, id: String, effect: Bytes.Bytes}
 
-def outbox.row(row: Bool, +s: U32) -> Run(Maybe<&2, Pending>):
+def outbox.row(row: Bool, +s: U32) -> Run(Maybe<Pending>):
   match row:
     case False{}:
-      Run.pure(Maybe<&2, Pending>, None{})
+      Run.pure(Maybe<Pending>, None{})
     case True{}:
-      do Run<Maybe<&2, Pending>>:
+      do Run<Maybe<Pending>>:
         seq : U32 <- Sqlite.stmt.column.int(s, 0)
         id : String <- Sqlite.stmt.column.text(s, 1)
-        e : String <- Sqlite.stmt.column.text(s, 2)
+        e : Bytes.Bytes <- column(s, 2)
         return Some{Pending{seq, id, e}}
 
-def outbox.first(+s: U32) -> Run(Maybe<&2, Pending>):
-  do Run<Maybe<&2, Pending>>:
+def outbox.first(+s: U32) -> Run(Maybe<Pending>):
+  do Run<Maybe<Pending>>:
     row : Bool <- Sqlite.stmt.step(s)
     outbox.row(row, s)
 
 # The oldest undelivered effect.
-def outbox.next(st: Store) -> Run(Maybe<&2, Pending>):
+def outbox.next(st: Store) -> Run(Maybe<Pending>):
   Store{db, begin, commit, rollback, find, read, save, keep, emit} = st
-  once(Maybe<&2, Pending>, db, "SELECT seq, id, effect FROM commands_outbox ORDER BY seq LIMIT 1", +s => outbox.first(s))
+  once(Maybe<Pending>, db, "SELECT seq, id, effect FROM commands_outbox ORDER BY seq LIMIT 1", +s => outbox.first(s))
 
 def outbox.ack.run(+s: U32, seq: U32) -> Run(Unit):
   do Run<Unit>:

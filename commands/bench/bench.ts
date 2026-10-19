@@ -6,33 +6,35 @@ const n = Number(process.argv[3] ?? 10000);
 const db = new Database(path);
 console.log(`sqlite\t${db.query<{ v: string }, []>("SELECT sqlite_version() AS v").get()!.v}`);
 db.run("PRAGMA busy_timeout = 10000");
-db.run("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state TEXT NOT NULL)");
-db.run("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload TEXT NOT NULL, kind INTEGER NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL)");
+db.run("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)");
+db.run("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)");
 db.run("CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)");
-db.run("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect TEXT NOT NULL)");
-db.run("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, '0')");
+db.run("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)");
+db.run("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))");
 
 const begin = db.prepare("BEGIN IMMEDIATE");
 const commit = db.prepare("COMMIT");
-const find = db.prepare<{ payload: string; result: string }, [string]>("SELECT payload, kind, result, at FROM commands_seen WHERE id = ?");
-const read = db.prepare<{ state: string }, []>("SELECT state FROM commands_state WHERE k = 0");
-const save = db.prepare<unknown, [string]>("UPDATE commands_state SET state = ? WHERE k = 0");
-const keep = db.prepare<unknown, [string, string, number, string, number]>("INSERT INTO commands_seen (id, payload, kind, result, at) VALUES (?, ?, ?, ?, ?)");
-const emit = db.prepare<unknown, [string, string]>("INSERT INTO commands_outbox (id, effect) VALUES (?, ?)");
+const find = db.prepare<{ payload: Uint8Array; result: Uint8Array }, [string]>("SELECT payload, kind, result, at FROM commands_seen WHERE id = ?");
+const read = db.prepare<{ state: Uint8Array }, []>("SELECT state FROM commands_state WHERE k = 0");
+const save = db.prepare<unknown, [Buffer]>("UPDATE commands_state SET state = ? WHERE k = 0");
+const keep = db.prepare<unknown, [string, Buffer, number, Buffer, number]>("INSERT INTO commands_seen (id, payload, kind, result, at) VALUES (?, ?, ?, ?, ?)");
+const emit = db.prepare<unknown, [string, Buffer]>("INSERT INTO commands_outbox (id, effect) VALUES (?, ?)");
+const dec = new TextDecoder();
+const num = (b: Uint8Array) => Number(dec.decode(b));
 
 // 1 for a new command, 2 for a duplicate, 0 for a conflict, with the recorded or new total.
-function handle(id: string, payload: string): [number, number] {
+function handle(id: string, payload: Buffer): [number, number] {
   begin.run();
   const row = find.get(id);
   if (row) {
     commit.run();
-    return [row.payload === payload ? 2 : 0, Number(row.result)];
+    return [payload.equals(row.payload) ? 2 : 0, num(row.result)];
   }
-  const total = (Number(read.get()!.state) + Number(payload)) >>> 0;
-  const t = String(total);
+  const total = (num(read.get()!.state) + num(payload)) >>> 0;
+  const t = Buffer.from(String(total));
   save.run(t);
   keep.run(id, payload, 1, t, 200);
-  emit.run(id, `total=${total}`);
+  emit.run(id, Buffer.from(`total=${total}`));
   commit.run();
   return [1, total];
 }
@@ -42,7 +44,7 @@ function pass(want: number): number {
   let x = 1;
   let h = 0;
   for (let i = 0; i < n; i += 1) {
-    const [kind, r] = handle(`cmd_${i}`, String((x >>> 1) % 1000));
+    const [kind, r] = handle(`cmd_${i}`, Buffer.from(String((x >>> 1) % 1000)));
     if (kind !== want) throw new Error("unexpected reply");
     h = (Math.imul(h, 31) + r) >>> 0;
     x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
@@ -53,7 +55,7 @@ function pass(want: number): number {
 let t0 = performance.now();
 pass(1);
 let t1 = performance.now();
-console.log(`fresh\t${(t1 - t0).toFixed(3)}\t${read.get()!.state}`);
+console.log(`fresh\t${(t1 - t0).toFixed(3)}\t${num(read.get()!.state)}`);
 t0 = performance.now();
 const h = pass(2);
 t1 = performance.now();

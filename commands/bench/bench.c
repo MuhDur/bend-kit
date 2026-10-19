@@ -39,14 +39,28 @@ static void text(sqlite3_stmt* st, int i, const char* s) {
   ok(sqlite3_bind_text(st, i, s, -1, SQLITE_TRANSIENT), SQLITE_OK);
 }
 
+static void blob(sqlite3_stmt* st, int i, const char* s) {
+  ok(sqlite3_bind_blob(st, i, s, (int)strlen(s), SQLITE_TRANSIENT), SQLITE_OK);
+}
+
+// A decimal blob column as a number.
+static uint32_t num(sqlite3_stmt* st, int i) {
+  const char* p = sqlite3_column_blob(st, i);
+  int         n = sqlite3_column_bytes(st, i);
+  uint32_t    v = 0;
+  for (int k = 0; k < n; k += 1) v = v * 10 + (uint32_t)(p[k] - '0');
+  return v;
+}
+
 // 1 for a new command, 2 for a duplicate, 0 for a conflict. *result is the recorded or new total.
 static int handle(const char* id, const char* payload, uint32_t* result) {
   run(begin_);
   text(find, 1, id);
   int rc = sqlite3_step(find);
   if (rc == SQLITE_ROW) {
-    int same = strcmp((const char*)sqlite3_column_text(find, 0), payload) == 0;
-    *result  = (uint32_t)strtoul((const char*)sqlite3_column_text(find, 2), NULL, 10);
+    const void* p    = sqlite3_column_blob(find, 0);
+    int         same = (size_t)sqlite3_column_bytes(find, 0) == strlen(payload) && memcmp(p, payload, strlen(payload)) == 0;
+    *result          = num(find, 2);
     ok(sqlite3_reset(find), SQLITE_OK);
     run(commit_);
     return same ? 2 : 0;
@@ -54,22 +68,22 @@ static int handle(const char* id, const char* payload, uint32_t* result) {
   ok(rc, SQLITE_DONE);
   ok(sqlite3_reset(find), SQLITE_OK);
   ok(sqlite3_step(readst), SQLITE_ROW);
-  uint32_t total = (uint32_t)strtoul((const char*)sqlite3_column_text(readst, 0), NULL, 10);
+  uint32_t total = num(readst, 0);
   ok(sqlite3_reset(readst), SQLITE_OK);
   total += (uint32_t)strtoul(payload, NULL, 10);
   char t[16], effect[32];
   snprintf(t, sizeof t, "%u", total);
   snprintf(effect, sizeof effect, "total=%u", total);
-  text(save, 1, t);
+  blob(save, 1, t);
   run(save);
   text(keep, 1, id);
-  text(keep, 2, payload);
+  blob(keep, 2, payload);
   ok(sqlite3_bind_int64(keep, 3, 1), SQLITE_OK);
-  text(keep, 4, t);
+  blob(keep, 4, t);
   ok(sqlite3_bind_int64(keep, 5, 200), SQLITE_OK);
   run(keep);
   text(emit, 1, id);
-  text(emit, 2, effect);
+  blob(emit, 2, effect);
   run(emit);
   run(commit_);
   *result = total;
@@ -100,11 +114,11 @@ int main(int argc, char** argv) {
   ok(sqlite3_open(path, &db), SQLITE_OK);
   printf("sqlite\t%s\n", sqlite3_libversion());
   exec("PRAGMA busy_timeout = 10000");
-  exec("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state TEXT NOT NULL)");
-  exec("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload TEXT NOT NULL, kind INTEGER NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL)");
+  exec("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)");
+  exec("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)");
   exec("CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)");
-  exec("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect TEXT NOT NULL)");
-  exec("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, '0')");
+  exec("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)");
+  exec("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))");
   begin_  = prepare("BEGIN IMMEDIATE");
   commit_ = prepare("COMMIT");
   find    = prepare("SELECT payload, kind, result, at FROM commands_seen WHERE id = ?");
@@ -117,7 +131,7 @@ int main(int argc, char** argv) {
   pass(n, 1);
   clock_gettime(CLOCK_MONOTONIC, &t1);
   ok(sqlite3_step(readst), SQLITE_ROW);
-  printf("fresh\t%.3f\t%s\n", ms(t0, t1), (const char*)sqlite3_column_text(readst, 0));
+  printf("fresh\t%.3f\t%u\n", ms(t0, t1), num(readst, 0));
   ok(sqlite3_reset(readst), SQLITE_OK);
 
   clock_gettime(CLOCK_MONOTONIC, &t0);
