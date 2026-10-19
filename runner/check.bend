@@ -120,7 +120,8 @@ def codec() -> IO(Unit):
     same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 9))), "none", "an unknown tag is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Cancel{8n}), 0, 16)))), "none", "a short Cancel is not an op")
 
-# ---- jobs: "log|kind:name". work notes the job in log, then answers by kind.
+# ---- jobs: "log|kind:name". work notes the job in log, runs it, then notes "end" and the job, and answers by kind.
+# A slow job sleeps 1 s before it ends.
 def note.close(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
   (f, x) = r
   File.close(f)
@@ -136,9 +137,11 @@ def outcome(+spec: String) -> Retry.Outcome:
 
 def work.go(xs: List<&2, String>) -> IO(Retry.Outcome):
   match xs:
-    case Con{log, Con{+spec, Nil{}}}:
+    case Con{+log, Con{+spec, Nil{}}}:
       do IO<Retry.Outcome>:
         note(log, spec)
+        IO.sleep(Bool.pick(U32, String.starts_with(spec, "slow:"), 1000, 0))
+        note(log, "end " ++ spec)
         return outcome(spec)
     case _:
       IO.pure(Retry.Outcome, Retry.Settled{})
@@ -297,12 +300,12 @@ def deferred(+now: Nat, x: R.Runner<String> & R.State<String>) -> IO(R.Runner<St
     ok(Nat.is_le(Nat.add(now, 50000n), root(String, Q.pending(String, q))), "a held job waits for the breaker's cooldown")
     return r
 
-# Two jobs of one target fail at once; the breaker opens after two failures, and no third attempt starts.
+# Two jobs of one target fail at once. The first failure opens the breaker, so no third attempt starts.
 def breaker(+dir: String) -> IO(Unit):
   +path = dir ++ "/breaker.journal"
   +log = dir ++ "/breaker.log"
   do IO<Unit>:
-    r0 : R.Runner<String> <- opened(path, 2n)
+    r0 : R.Runner<String> <- opened(path, 1n)
     r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|fail:p")
     r2 : R.Runner<String> <- enq(r1, 0n, log ++ "|fail:q")
     y : R.Ran(String) <- R.drain(~String, ~penc, ~target, ~work, 20n, r2)
@@ -455,11 +458,54 @@ def crash.compacted(+dir: String) -> IO(Unit):
     xs : List<&2, String> <- read(log)
     same(counts(xs, ["ok:x", "crash:z"]), "ok:x=1 crash:z=2 ", "z runs again after the crash, and the completed x does not")
 
+def ticked(t: R.Runner<String> & R.Out(Bool)) -> IO(R.Runner<String>):
+  match t:
+    case (r, Done{b}):
+      IO.pure(R.Runner<String>, r)
+    case (r, Fail{(c, m)}):
+      IO.die(R.Runner<String>, 1, "bad tick: " ++ m)
+
+# The most attempts that run at once in a log: a job line starts one, and an "end" line ends one.
+def peak(xs: List<&2, String>, +cur: Nat, +best: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      best
+    case Con{+h, t}:
+      +c = Bool.pick(Nat, String.starts_with(h, "end "), Nat.sub(cur, 1n), Bool.pick(Nat, String.eq(h, ""), cur, Nat.add(cur, 1n)))
+      peak(t, c, Bool.pick(Nat, Nat.is_lt(best, c), c, best))
+
+def last(xs: List<&2, String>, +acc: String) -> String:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{+h, t}:
+      last(t, Bool.pick(String, String.eq(h, ""), acc, h))
+
+# Capacity 2: a slow job and five fast jobs. One tick runs them all, and the fast jobs finish in the free unit while the slow one runs.
+def overlap(+dir: String) -> IO(Unit):
+  +path = dir ++ "/overlap.journal"
+  +log = dir ++ "/overlap.log"
+  do IO<Unit>:
+    r0 : R.Runner<String> <- opened(path, 100n)
+    r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|slow:s")
+    r2 : R.Runner<String> <- enq(r1, 0n, log ++ "|ok:f1")
+    r3 : R.Runner<String> <- enq(r2, 0n, log ++ "|ok:f2")
+    r4 : R.Runner<String> <- enq(r3, 0n, log ++ "|ok:f3")
+    r5 : R.Runner<String> <- enq(r4, 0n, log ++ "|ok:f4")
+    r6 : R.Runner<String> <- enq(r5, 0n, log ++ "|ok:f5")
+    t : R.Runner<String> & R.Out(Bool) <- R.tick(~String, ~penc, ~target, ~work, r6)
+    r7 : R.Runner<String> <- ticked(t)
+    closed("next=6 pending=0 running=0 tries=0 fails=0", "one tick runs a slow job and five fast jobs", view(r7))
+    +ys : List<&2, String> <- read(log)
+    same(Nat.show(peak(ys, 0n, 0n)), "2", "no more attempts run at once than the capacity")
+    same(last(ys, ""), "end slow:s", "the fast jobs finish while the slow job runs")
+
 def all(+dir: String) -> IO(Unit):
   do IO<Unit>:
     durable(dir)
     crash(dir)
     breaker(dir)
+    overlap(dir)
     compaction(dir)
     compaction.auto(dir)
     crash.snapshot(dir)

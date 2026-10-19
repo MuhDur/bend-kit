@@ -579,15 +579,20 @@ type Log is Type:
 type Runner<-A: Data> is Type:
   Runner{log: Log, state: State<A>, pool: Res.Pool, breakers: Map<&2, Retry.Breaker>, config: Config}
 
-# An attempt that runs: its unit of the pool, the budget that admit left, its target, and the channel of its outcome.
+# An attempt that runs: its unit of the pool, the budget that admit left, and its target.
 type Flight<-A: Data> is Type:
-  Flight{ticket: Q.Ticket<A>, grant: Res.Grant, budget: Retry.Budget, target: String, chan: Chan(Retry.Outcome)}
+  Flight{ticket: Q.Ticket<A>, grant: Res.Grant, budget: Retry.Budget, target: String}
 
 def Out(-X: Type) -> Type:
   Result<&1, &1, U32 & String, X>
 
+# Each attempt sends its ticket id and outcome on the round's one channel, so tick settles them in the order they finish.
+def Msg() -> Type:
+  Nat & Retry.Outcome
+
+# The runner, the attempts that run, the claim fuel left, and the first error.
 def Claimed(-A: Data) -> Type:
-  Runner<A> & List<&1, Flight<A>> & Out(Unit)
+  Runner<A> & List<&1, Flight<A>> & Nat & Out(Unit)
 
 def Ran(-A: Data) -> Type:
   Runner<A> & Out(Unit)
@@ -654,80 +659,86 @@ def release(-A: Data, r: Runner<A>, g: Res.Grant) -> Runner<A>:
 def claim.held(-A: Data, y: Ran(A), g: Res.Grant, fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   match y:
     case (r, Fail{e}):
-      IO.pure(Claimed(A), (release(A, r, g), fs, Fail{e}))
+      IO.pure(Claimed(A), (release(A, r, g), fs, 0n, Fail{e}))
     case (r, Done{u}):
       next(release(A, r, g), fs)
 
-def claim.go(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +now: Nat, a: Retry.Breaker & Retry.Budget & Retry.Gate, +key: String,
+def claim.tag(+id: Nat, o: Retry.Outcome) -> IO(Msg()):
+  IO.pure(Msg(), (id, o))
+
+def claim.go(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +ch: Chan(Msg()), +now: Nat, a: Retry.Breaker & Retry.Budget & Retry.Gate, +key: String,
     j: Log, s: State<A>, p: Res.Pool, bs: Map<&2, Retry.Breaker>, c: Config, +id: Nat, d: Nat, +x: A, g: Res.Grant,
     fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   match a:
     case (+br, b, Retry.GateGo{}):
       do IO<Claimed(A)>:
-        ch : Chan(Retry.Outcome) <- IO.fork(Retry.Outcome, work(x))
-        next(Runner{j, s, p, Map.set(&2, Retry.Breaker, bs, key, br), c}, Con{Flight{Q.Ticket{id, d, x}, g, b, key, ch}, fs})
+        u : Chan(Msg()) <- IO.fork.go(Msg(), IO.bind(Retry.Outcome, Msg(), work(x), o => claim.tag(id, o)), ch)
+        next(Runner{j, s, p, Map.set(&2, Retry.Breaker, bs, key, br), c}, Con{Flight{Q.Ticket{id, d, x}, g, b, key}, fs})
     case (+br, b, Retry.GateNo{why}):
       do IO<Claimed(A)>:
         y : Ran(A) <- commit(~A, ~penc, Runner{j, s, p, Map.set(&2, Retry.Breaker, bs, key, br), c}, held(A, why, br, id, now))
         claim.held(A, y, g, fs, next)
 
-def claim.gate(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +now: Nat, got: Map<&2, Retry.Breaker> & Retry.Breaker, +key: String,
+def claim.gate(~A: Data, ~penc: A -> Bytes.Bytes, ~work: A -> IO(Retry.Outcome), +ch: Chan(Msg()), +now: Nat, got: Map<&2, Retry.Breaker> & Retry.Breaker, +key: String,
     j: Log, +s: State<A>, p: Res.Pool, +c: Config, +id: Nat, d: Nat, +x: A, g: Res.Grant,
     fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   (bs, br) = got
   Config{pol, circ, idle, every} = c
-  claim.go(~A, ~penc, ~work, now, Retry.admit(br, budget(pol, tries.get(tries(A, s), id)), now), key, j, s, p, bs, c, id, d, x, g, fs, next)
+  claim.go(~A, ~penc, ~work, ch, now, Retry.admit(br, budget(pol, tries.get(tries(A, s), id)), now), key, j, s, p, bs, c, id, d, x, g, fs, next)
 
 # The selected ticket asks its target's breaker and its own budget for an attempt.
-def claim.admit(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, r: Runner<A>, t: Q.Ticket<A>, g: Res.Grant,
+def claim.admit(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +ch: Chan(Msg()), +now: Nat, r: Runner<A>, t: Q.Ticket<A>, g: Res.Grant,
     fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   Runner{j, s, p, bs, +c} = r
   Config{pol, circ, idle, every} = c
   Q.Ticket{id, d, +x} = t
   +key = target(x)
-  claim.gate(~A, ~penc, ~work, now, Map.get(Retry.Breaker, Retry.Breaker.new(circ), bs, key), key, j, s, p, c, id, d, x, g, fs, next)
+  claim.gate(~A, ~penc, ~work, ch, now, Map.get(Retry.Breaker, Retry.Breaker.new(circ), bs, key), key, j, s, p, c, id, d, x, g, fs, next)
 
-def claim.selected(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, y: Ran(A),
+def claim.selected(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +ch: Chan(Msg()), +now: Nat, y: Ran(A),
     t: Q.Ticket<A>, g: Res.Grant, fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   match y:
     case (r, Fail{e}):
-      IO.pure(Claimed(A), (release(A, r, g), fs, Fail{e}))
+      IO.pure(Claimed(A), (release(A, r, g), fs, 0n, Fail{e}))
     case (r, Done{u}):
-      claim.admit(~A, ~penc, ~target, ~work, now, r, t, g, fs, next)
+      claim.admit(~A, ~penc, ~target, ~work, ch, now, r, t, g, fs, next)
 
-def claim.pick(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, k: Pick<A>, j: Log, s: State<A>,
+def claim.pick(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +ch: Chan(Msg()), +left: Nat, +now: Nat, k: Pick<A>, j: Log, s: State<A>,
     bs: Map<&2, Retry.Breaker>, c: Config, fs: List<&1, Flight<A>>, next: Runner<A> -> List<&1, Flight<A>> -> IO(Claimed(A))) -> IO(Claimed(A)):
   match k:
     case Idle{p}:
-      IO.pure(Claimed(A), (Runner{j, s, p, bs, c}, fs, Done{Unit{}}))
+      IO.pure(Claimed(A), (Runner{j, s, p, bs, c}, fs, Nat.add(1n, left), Done{Unit{}}))
     case Picked{p, t, g}:
       do IO<Claimed(A)>:
         y : Ran(A) <- commit(~A, ~penc, Runner{j, s, p, bs, c}, Select{now})
-        claim.selected(~A, ~penc, ~target, ~work, now, y, t, g, fs, next)
+        claim.selected(~A, ~penc, ~target, ~work, ch, now, y, t, g, fs, next)
 
-# Starts an attempt for each due ticket while the pool has a free unit. fuel bounds the tickets taken.
-def claim(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), fuel: Nat, +now: Nat, r: Runner<A>, fs: List<&1, Flight<A>>) ->
+# Starts an attempt for each due ticket while the pool has a free unit; each attempt sends its outcome on ch.
+# fuel bounds the tickets taken, and the fuel left comes back.
+def claim(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), fuel: Nat, +ch: Chan(Msg()), +now: Nat, r: Runner<A>, fs: List<&1, Flight<A>>) ->
     IO(Claimed(A)):
   match fuel:
     case 0n:
-      IO.pure(Claimed(A), (r, fs, Done{Unit{}}))
+      IO.pure(Claimed(A), (r, fs, 0n, Done{Unit{}}))
     case 1n+n:
       Runner{j, +s, p, bs, c} = r
-      claim.pick(~A, ~penc, ~target, ~work, now, pick(~A, p, s, now), j, s, bs, c, fs, (r2 => fs2 => claim(~A, ~penc, ~target, ~work, n, now, r2, fs2)))
+      +m = n
+      claim.pick(~A, ~penc, ~target, ~work, ch, m, now, pick(~A, p, s, now), j, s, bs, c, fs, (r2 => fs2 => claim(~A, ~penc, ~target, ~work, m, ch, now, r2, fs2)))
 
-def settle.done(-A: Data, y: Ran(A), g: Res.Grant, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
+def settle.done(-A: Data, y: Ran(A), g: Res.Grant, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Runner<A> & Out(Bool))) -> IO(Runner<A> & Out(Bool)):
   (r, res) = y
   next(release(A, r, g), first(err, res))
 
 def settle.br(~A: Data, ~penc: A -> Bytes.Bytes, +failed: Bool, +key: String, +now: Nat, got: Map<&2, Retry.Breaker> & Retry.Breaker, +op: Op<A>,
-    j: Log, s: State<A>, p: Res.Pool, c: Config, g: Res.Grant, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
+    j: Log, s: State<A>, p: Res.Pool, c: Config, g: Res.Grant, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Runner<A> & Out(Bool))) -> IO(Runner<A> & Out(Bool)):
   (bs, br) = got
-  do IO<Ran(A)>:
+  do IO<Runner<A> & Out(Bool)>:
     y : Ran(A) <- commit(~A, ~penc, Runner{j, s, p, Map.set(&2, Retry.Breaker, bs, key, Retry.Breaker.done(br, now, failed)), c}, op)
     settle.done(A, y, g, err, next)
 
+# Tells the target's breaker, appends Complete or Requeue, and returns the attempt's unit to the pool.
 def settle.op(~A: Data, ~penc: A -> Bytes.Bytes, +o: Retry.Outcome, b: Retry.Budget, +id: Nat, +key: String, +now: Nat, +rnd: Nat, r: Runner<A>, g: Res.Grant,
-    err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
+    err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Runner<A> & Out(Bool))) -> IO(Runner<A> & Out(Bool)):
   Runner{j, +s, p, bs, +c} = r
   Config{pol, circ, idle, every} = c
   settle.br(~A, ~penc, Retry.failed(o), key, now, Map.get(Retry.Breaker, Retry.Breaker.new(circ), bs, key),
@@ -740,21 +751,55 @@ def random(r: Out(U32)) -> Nat:
     case Fail{e}:
       0n
 
-# Waits for the attempt, tells its target's breaker, appends Complete or Requeue, and returns its unit to the pool.
-def settle.one(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>, f: Flight<A>, err: Out(Unit), next: Runner<A> -> Out(Unit) -> IO(Ran(A))) -> IO(Ran(A)):
-  Flight{Q.Ticket{id, d, x}, g, b, key, ch} = f
-  do IO<Ran(A)>:
-    o : Retry.Outcome <- IO.join(Retry.Outcome, ch)
-    now : Nat <- clock()
-    rnd : Out(U32) <- IO.random_u32()
-    settle.op(~A, ~penc, o, b, id, key, now, random(rnd), r, g, err, next)
+def take.keep(-A: Data, m: Maybe<&1, Flight<A>>, xs: List<&1, Flight<A>>) -> List<&1, Flight<A>>:
+  match m:
+    case None{}:
+      xs
+    case Some{f}:
+      Con{f, xs}
 
-def settle(~A: Data, ~penc: A -> Bytes.Bytes, fs: List<&1, Flight<A>>, r: Runner<A>, err: Out(Unit)) -> IO(Ran(A)):
+def take.at(-A: Data, eq: Bool, f: Flight<A>, r: Maybe<&1, Flight<A>> & List<&1, Flight<A>>) -> Maybe<&1, Flight<A>> & List<&1, Flight<A>>:
+  match eq:
+    case True{}:
+      (m, xs) = r
+      (Some{f}, take.keep(A, m, xs))
+    case False{}:
+      (m, xs) = r
+      (m, Con{f, xs})
+
+# The flight of ticket id, and the other flights.
+def take(-A: Data, fs: List<&1, Flight<A>>, +id: Nat) -> Maybe<&1, Flight<A>> & List<&1, Flight<A>>:
   match fs:
     case Nil{}:
-      IO.pure(Ran(A), (r, err))
-    case Con{f, rest}:
-      settle.one(~A, ~penc, r, f, err, (r2 => e2 => settle(~A, ~penc, rest, r2, e2)))
+      (None{}, Nil{})
+    case Con{Flight{Q.Ticket{+i, d, x}, g, b, k}, rest}:
+      take.at(A, Nat.is_eq(i, id), Flight{Q.Ticket{i, d, x}, g, b, k}, take(A, rest, id))
+
+def settle.flight(~A: Data, ~penc: A -> Bytes.Bytes, mf: Maybe<&1, Flight<A>>, fs: List<&1, Flight<A>>, +o: Retry.Outcome, +now: Nat, +rnd: Nat, r: Runner<A>, err: Out(Unit),
+    next: Runner<A> -> List<&1, Flight<A>> -> Out(Unit) -> IO(Runner<A> & Out(Bool))) -> IO(Runner<A> & Out(Bool)):
+  match mf:
+    case None{}:
+      next(r, fs, err)
+    case Some{Flight{Q.Ticket{id, d, x}, g, b, key}}:
+      settle.op(~A, ~penc, o, b, id, key, now, rnd, r, g, err, (r2 => e2 => next(r2, fs, e2)))
+
+def settle.take(~A: Data, ~penc: A -> Bytes.Bytes, t: Maybe<&1, Flight<A>> & List<&1, Flight<A>>, +o: Retry.Outcome, +now: Nat, +rnd: Nat, r: Runner<A>, err: Out(Unit),
+    next: Runner<A> -> List<&1, Flight<A>> -> Out(Unit) -> IO(Runner<A> & Out(Bool))) -> IO(Runner<A> & Out(Bool)):
+  (mf, fs) = t
+  settle.flight(~A, ~penc, mf, fs, o, now, rnd, r, err, next)
+
+# Settles the flight that m names. A closed channel is an error, and no flight settles.
+def settle(~A: Data, ~penc: A -> Bytes.Bytes, m: Maybe<&1, Msg()>, +now: Nat, +rnd: Nat, r: Runner<A>, fs: List<&1, Flight<A>>, err: Out(Unit),
+    next: Runner<A> -> List<&1, Flight<A>> -> Out(Unit) -> IO(Runner<A> & Out(Bool))) -> IO(Runner<A> & Out(Bool)):
+  match m:
+    case None{}:
+      next(r, fs, first(err, Fail{(32, "runner: the outcome channel closed")}))
+    case Some{(+id, +o)}:
+      settle.take(~A, ~penc, take(A, fs, id), o, now, rnd, r, err, next)
+
+def merged(-A: Data, e: Out(Unit), k: Claimed(A)) -> Claimed(A):
+  (r, fs, n, err) = k
+  (r, fs, n, first(e, err))
 
 def empty.heap(-A: Data, h: H.Heap<Q.Ticket<A>>) -> Bool:
   match h:
@@ -875,10 +920,6 @@ def tick.ran(e: Out(Unit), b: Bool) -> Out(Bool):
     case Done{u}:
       Done{b}
 
-def tick.done(-A: Data, y: Ran(A)) -> Runner<A> & Out(Bool):
-  (r, e) = y
-  (r, tick.ran(e, True{}))
-
 def tick.compacted(-A: Data, +b: Bool, y: Ran(A)) -> Runner<A> & Out(Bool):
   (r, e) = y
   (r, tick.ran(e, b))
@@ -906,22 +947,42 @@ def tick.grown(~A: Data, ~penc: A -> Bytes.Bytes, t: Runner<A> & Out(Bool)) -> I
     case (r, Done{b}):
       tick.size(~A, ~penc, r, b)
 
-def tick.settle(~A: Data, ~penc: A -> Bytes.Bytes, c: Claimed(A)) -> IO(Runner<A> & Out(Bool)):
-  match c:
-    case (r, Nil{}, err):
-      IO.pure(Runner<A> & Out(Bool), (r, tick.ran(err, False{})))
-    case (r, Con{f, fs}, err):
-      do IO<Runner<A> & Out(Bool)>:
-        y : Ran(A) <- settle(~A, ~penc, Con{f, fs}, r, err)
-        return tick.done(A, y)
+# Waits for the next attempt to finish, settles it, then claims due tickets into the freed unit with the claim fuel left.
+# fuel bounds the settles. claim starts at most as many attempts as the same fuel, so every attempt settles before fuel ends.
+def tick.run(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), fuel: Nat, +ch: Chan(Msg()), +ran: Bool, k: Claimed(A)) ->
+    IO(Runner<A> & Out(Bool)):
+  match fuel:
+    case 0n:
+      match k:
+        case (r, Nil{}, left, err):
+          IO.pure(Runner<A> & Out(Bool), (r, tick.ran(err, ran)))
+        case (r, Con{f, fs}, left, err):
+          IO.pure(Runner<A> & Out(Bool), (r, tick.ran(first(err, Fail{(62, "runner: an attempt outlived the round")}), ran)))
+    case 1n+n:
+      match k:
+        case (r, Nil{}, left, err):
+          IO.pure(Runner<A> & Out(Bool), (r, tick.ran(err, ran)))
+        case (r, Con{f, fs}, +left, err):
+          do IO<Runner<A> & Out(Bool)>:
+            m : Maybe<&1, Msg()> <- Chan.recv(Msg(), ch)
+            +now : Nat <- clock()
+            rnd : Out(U32) <- IO.random_u32()
+            settle(~A, ~penc, m, now, random(rnd), r, Con{f, fs}, err, (r2 => fs2 => e2 =>
+              IO.bind(Claimed(A), Runner<A> & Out(Bool), claim(~A, ~penc, ~target, ~work, left, ch, now, r2, fs2),
+                k2 => tick.run(~A, ~penc, ~target, ~work, n, ch, True{}, merged(A, e2, k2)))))
 
 def tick.at(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +now: Nat, r: Runner<A>) -> IO(Runner<A> & Out(Bool)):
-  Runner{j, +s, p, bs, c} = r
+  Runner{j, +s, +p, bs, c} = r
+  +fuel = Nat.add(1n, pending(A, s))
   do IO<Runner<A> & Out(Bool)>:
-    k : Claimed(A) <- claim(~A, ~penc, ~target, ~work, 1n+pending(A, s), now, Runner{j, s, p, bs, c}, Nil{})
-    tick.settle(~A, ~penc, k)
+    +ch : Chan(Msg()) <- Chan.new(Msg(), (U32.from_nat(Res.capacity(p)) + 1 : U32))
+    k : Claimed(A) <- claim(~A, ~penc, ~target, ~work, fuel, ch, now, Runner{j, s, p, bs, c}, Nil{})
+    t : Runner<A> & Out(Bool) <- tick.run(~A, ~penc, ~target, ~work, fuel, ch, False{}, k)
+    Chan.close(Msg(), ch)
+    return t
 
-# One round: start an attempt for each due ticket the pool admits, wait for them all, and record each outcome.
+# One round: start an attempt for each due ticket the pool admits. As each attempt finishes, record its outcome,
+# return its unit, and start the next due ticket in that unit. The round ends when no attempt runs.
 # Then compact the journal when it grew past Config.compact. Done{True} when an attempt ran.
 # work runs on its own; target names the breaker that guards it.
 def tick(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), r: Runner<A>) -> IO(Runner<A> & Out(Bool)):
