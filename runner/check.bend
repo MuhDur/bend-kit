@@ -34,6 +34,15 @@ def penc(s: String) -> Bytes.Bytes:
 def pdec(b: Bytes.Bytes) -> Maybe<&2, String>:
   Some{Bytes.to_string(b)}
 
+def show.why(w: R.Why) -> String:
+  match w:
+    case R.WhySpent{}:
+      "spent"
+    case R.WhyLate{}:
+      "late"
+    case R.WhyUnsafe{}:
+      "unsafe"
+
 def show(m: Maybe<&2, R.Op<String>>) -> String:
   match m:
     case None{}:
@@ -50,6 +59,10 @@ def show(m: Maybe<&2, R.Op<String>>) -> String:
       "requeue " ++ Nat.show(i) ++ " " ++ Nat.show(d)
     case Some{R.Defer{i, d}}:
       "defer " ++ Nat.show(i) ++ " " ++ Nat.show(d)
+    case Some{R.Abandon{i, w}}:
+      "abandon " ++ Nat.show(i) ++ " " ++ show.why(w)
+    case Some{R.Revive{i, d}}:
+      "revive " ++ Nat.show(i) ++ " " ++ Nat.show(d)
 
 def rt(+op: R.Op<String>) -> String:
   show(R.decode(~String, ~pdec, R.encode(~String, ~penc, op)))
@@ -64,10 +77,10 @@ def live(ops: List<&2, R.Op<String>>, s: R.State<String>) -> R.State<String>:
     case Con{op, rest}:
       live(rest, R.step(~String, s, op))
 
-# Two tickets pending, two running, one requeued once, one cancelled.
+# Two tickets pending, one running, one requeued once, one cancelled, and one dead.
 def sample() -> R.State<String>:
   live([R.Enqueue{5n, "a"}, R.Enqueue{big(), "b|c"}, R.Enqueue{3n, ""}, R.Select{10n}, R.Requeue{2n, 20n}, R.Select{30n}, R.Enqueue{1n, "d"},
-    R.Enqueue{40n, "e"}, R.Cancel{4n}, R.Select{30n}], R.new(String))
+    R.Enqueue{40n, "e"}, R.Cancel{4n}, R.Select{30n}, R.Abandon{0n, R.WhyUnsafe{}}], R.new(String))
 
 def hex(s: R.State<String>) -> String:
   Bytes.to_hex(R.encode.snap(~String, ~penc, s))
@@ -91,15 +104,24 @@ def fails(ts: List<&1, Nat & R.Try>) -> Nat:
     case Con{(i, R.Try{f, st}), rest}:
       Nat.add(f, fails(rest))
 
+# Each dead ticket as id:why:payload, newest first.
+def graves(ds: List<&2, R.Dead<String>>) -> String:
+  match ds:
+    case Nil{}:
+      ""
+    case Con{R.Dead{Q.Ticket{i, d, x}, w}, rest}:
+      Nat.show(i) ++ ":" ++ show.why(w) ++ ":" ++ x ++ " " ++ graves(rest)
+
 def describe(s: R.State<String>) -> String:
-  R.State{Q.State{+n, +h, +run}, +ts} = s
-  "next=" ++ Nat.show(n) ++ " pending=" ++ Nat.show(R.pending(String, R.State{Q.State{n, h, run}, ts})) ++ " running=" ++ Nat.show(List.length(&2, Q.Ticket<String>, run)) ++
-    " tries=" ++ U32.show(O.OMap.size(Nat, R.Try, ts)) ++ " fails=" ++ Nat.show(fails(O.OMap.to_list(Nat, R.Try, ts)))
+  R.State{Q.State{+n, +h, +run}, +ts, +ds} = s
+  "next=" ++ Nat.show(n) ++ " pending=" ++ Nat.show(R.pending(String, R.State{Q.State{n, h, run}, ts, ds})) ++ " running=" ++ Nat.show(List.length(&2, Q.Ticket<String>, run)) ++
+    " tries=" ++ U32.show(O.OMap.size(Nat, R.Try, ts)) ++ " fails=" ++ Nat.show(fails(O.OMap.to_list(Nat, R.Try, ts))) ++ " dead=" ++ Nat.show(List.length(&2, R.Dead<String>, ds))
 
 def snapshots() -> IO(Unit):
   do IO<Unit>:
-    same(describe(sample()), "next=5 pending=2 running=2 tries=4 fails=1", "the sample state has pending, running, and retried tickets")
-    same(rec(R.encode.snap(~String, ~penc, sample())), hex(sample()), "a snapshot decodes to the same heap, running list, and tries")
+    same(describe(sample()), "next=5 pending=2 running=1 tries=3 fails=1 dead=1", "the sample state has pending, running, retried, and dead tickets")
+    same(graves(R.dead(String, sample())), "0:unsafe:a ", "a dead ticket keeps its payload and why")
+    same(rec(R.encode.snap(~String, ~penc, sample())), hex(sample()), "a snapshot decodes to the same heap, running list, tries, and dead tickets")
     same(rec(R.encode.snap(~String, ~penc, R.new(String))), hex(R.new(String)), "an empty snapshot round-trips")
     same(rec(R.encode(~String, ~penc, R.Cancel{8n})), "op cancel 8", "an op record decodes as an op")
     same(rec(Bytes.snd(Bytes.slice(R.encode.snap(~String, ~penc, sample()), 0, 60))), "none", "a short snapshot does not decode")
@@ -116,8 +138,13 @@ def codec() -> IO(Unit):
     same(rt(R.Cancel{8n}), "cancel 8", "a Cancel keeps its id")
     same(rt(R.Requeue{9n, t}), "requeue 9 1700000000123", "a Requeue keeps its id and deadline")
     same(rt(R.Defer{10n, t}), "defer 10 1700000000123", "a Defer keeps its id and deadline")
+    same(rt(R.Abandon{11n, R.WhySpent{}}), "abandon 11 spent", "an Abandon keeps its id and a spent why")
+    same(rt(R.Abandon{11n, R.WhyLate{}}), "abandon 11 late", "an Abandon keeps a late why")
+    same(rt(R.Abandon{11n, R.WhyUnsafe{}}), "abandon 11 unsafe", "an Abandon keeps an unsafe why")
+    same(rt(R.Revive{12n, t}), "revive 12 1700000000123", "a Revive keeps its id and deadline")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}}), 12, 3))), "none", "an Abandon with an unknown why is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.from_string("abc"))), "none", "a record shorter than a head is not an op")
-    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 9))), "none", "an unknown tag is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 10))), "none", "an unknown tag is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Cancel{8n}), 0, 16)))), "none", "a short Cancel is not an op")
 
 # ---- jobs: "log|kind:name". work notes the job in log, runs it, then notes "end" and the job, and answers by kind.
@@ -232,7 +259,18 @@ def closed(+want: String, +name: String, x: R.Runner<String> & String) -> IO(Uni
     same(got, want, name)
     R.close(String, r)
 
-# Three jobs: two succeed once; one fails every time and stops after the policy's 3 attempts.
+def held(x: R.Runner<String> & String, +want: String, +name: String) -> IO(R.Runner<String>):
+  (r, got) = x
+  do IO<R.Runner<String>>:
+    same(got, want, name)
+    return r
+
+def dead.of(x: R.Runner<String> & R.State<String>) -> R.Runner<String> & String:
+  (r, s) = x
+  (r, graves(R.dead(String, s)))
+
+# Three jobs: two succeed once. One fails every time; after the policy's 3 attempts it is dead, with its payload.
+# It stays dead across a reopen, runs 3 attempts again after a revive, and a cancel drops it.
 def durable(+dir: String) -> IO(Unit):
   +path = dir ++ "/jobs.journal"
   +log = dir ++ "/jobs.log"
@@ -242,11 +280,22 @@ def durable(+dir: String) -> IO(Unit):
     r2 : R.Runner<String> <- enq(r1, 0n, log ++ "|fail:b")
     r3 : R.Runner<String> <- enq(r2, 0n, log ++ "|ok:c")
     r4 : R.Runner<String> <- drain(r3)
-    closed("next=3 pending=0 running=0 tries=0 fails=0", "drain completes every job and drops its tries", view(r4))
+    closed("next=3 pending=0 running=0 tries=0 fails=0 dead=1", "drain completes the good jobs and keeps the failing one dead", view(r4))
     xs : List<&2, String> <- read(log)
     same(counts(xs, ["ok:a", "fail:b", "ok:c"]), "ok:a=1 fail:b=3 ok:c=1 ", "a job runs once; a failing job runs the policy's 3 attempts")
     r5 : R.Runner<String> <- opened(path, 100n)
-    closed("next=3 pending=0 running=0 tries=0 fails=0", "reopen replays the same state", view(r5))
+    r6 : R.Runner<String> <- held(view(r5), "next=3 pending=0 running=0 tries=0 fails=0 dead=1", "reopen replays the same state")
+    r7 : R.Runner<String> <- held(dead.of(R.state(String, r6)), "1:spent:" ++ log ++ "|fail:b ", "the dead job keeps its payload across a reopen")
+    y : R.Ran(String) <- R.revive(~String, ~penc, r7, 1n, 0n)
+    r8 : R.Runner<String> <- ran(y)
+    r9 : R.Runner<String> <- held(view(r8), "next=3 pending=1 running=0 tries=1 fails=0 dead=0", "revive makes the dead job pending with a new budget")
+    r10 : R.Runner<String> <- drain(r9)
+    ys : List<&2, String> <- read(log)
+    same(counts(ys, ["ok:a", "fail:b", "ok:c"]), "ok:a=1 fail:b=6 ok:c=1 ", "the revived job runs 3 more attempts, and no other job runs again")
+    r11 : R.Runner<String> <- held(view(r10), "next=3 pending=0 running=0 tries=0 fails=0 dead=1", "the revived job is dead again")
+    z : R.Ran(String) <- R.cancel(~String, ~penc, r11, 1n)
+    r12 : R.Runner<String> <- ran(z)
+    closed("next=3 pending=0 running=0 tries=0 fails=0 dead=0", "cancel drops a dead job", view(r12))
 
 def status(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> U32:
   match r:
@@ -254,12 +303,6 @@ def status(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> U32:
       s
     case Fail{e}:
       0
-
-def held(x: R.Runner<String> & String, +want: String, +name: String) -> IO(R.Runner<String>):
-  (r, got) = x
-  do IO<R.Runner<String>>:
-    same(got, want, name)
-    return r
 
 # A child completes x, then dies inside y's attempt. On reopen y runs again, and x does not.
 def crash(+dir: String) -> IO(Unit):
@@ -271,9 +314,9 @@ def crash(+dir: String) -> IO(Unit):
     xs : List<&2, String> <- read(log)
     same(counts(xs, ["ok:x", "crash:y"]), "ok:x=1 crash:y=1 ", "the child ran x, then started y")
     r0 : R.Runner<String> <- opened(path, 100n)
-    r1 : R.Runner<String> <- held(view(r0), "next=2 pending=1 running=0 tries=1 fails=1", "reopen requeues the running y as a failed attempt, and x stays complete")
+    r1 : R.Runner<String> <- held(view(r0), "next=2 pending=1 running=0 tries=1 fails=1 dead=0", "reopen requeues the running y as a failed attempt, and x stays complete")
     r2 : R.Runner<String> <- drain(r1)
-    closed("next=2 pending=0 running=0 tries=0 fails=0", "the requeued y completes", view(r2))
+    closed("next=2 pending=0 running=0 tries=0 fails=0 dead=0", "the requeued y completes", view(r2))
     ys : List<&2, String> <- read(log)
     same(counts(ys, ["ok:x", "crash:y"]), "ok:x=1 crash:y=2 ", "y runs again after the crash, and the completed x does not")
 
@@ -295,7 +338,7 @@ def root(-A: Data, h: H.Heap<Q.Ticket<A>>) -> Nat:
 
 def deferred(+now: Nat, x: R.Runner<String> & R.State<String>) -> IO(R.Runner<String>):
   (r, s) = x
-  R.State{q, ts} = s
+  R.State{q, ts, ds} = s
   do IO<R.Runner<String>>:
     ok(Nat.is_le(Nat.add(now, 50000n), root(String, Q.pending(String, q))), "a held job waits for the breaker's cooldown")
     return r
@@ -312,7 +355,7 @@ def breaker(+dir: String) -> IO(Unit):
     r3 : R.Runner<String> <- left(y)
     now : Nat <- R.clock()
     r4 : R.Runner<String> <- deferred(now, R.state(String, r3))
-    closed("next=2 pending=2 running=0 tries=2 fails=2", "a deferral counts no failure", view(r4))
+    closed("next=2 pending=2 running=0 tries=2 fails=2 dead=0", "a deferral counts no failure", view(r4))
     xs : List<&2, String> <- read(log)
     same(counts(xs, ["fail:p", "fail:q"]), "fail:p=1 fail:q=1 ", "an open breaker starts no attempt")
 
@@ -382,7 +425,7 @@ def compaction(+dir: String) -> IO(Unit):
     want : String <- closed.hex(state.hex(R.state(String, r7)))
     r8 : R.Runner<String> <- opened.every(path, 100n, 0, max)
     r9 : R.Runner<String> <- held(state.hex(R.state(String, r8)), want, "reopen replays the snapshot and the records after it to the same state")
-    closed("next=5 pending=2 running=0 tries=2 fails=0", "the compacted journal keeps the waiting jobs and drops the finished ones", view(r9))
+    closed("next=5 pending=2 running=0 tries=2 fails=0 dead=1", "the compacted journal keeps the waiting and dead jobs and drops the finished ones", view(r9))
     xs : List<&2, String> <- read(log)
     same(counts(xs, ["ok:a", "fail:b", "ok:c"]), "ok:a=1 fail:b=3 ok:c=1 ", "no finished job runs again after compaction")
 
@@ -397,9 +440,9 @@ def compaction.auto(+dir: String) -> IO(Unit):
     r3 : R.Runner<String> <- drain(r2)
     n : U32 <- size(path)
     r4 : R.Runner<String> <- held(state.size(R.state(String, r3)), U32.show(n), "the journal is one frame that holds the snapshot")
-    closed("next=2 pending=0 running=0 tries=0 fails=0", "tick compacts and keeps the state", view(r4))
+    closed("next=2 pending=0 running=0 tries=0 fails=0 dead=1", "tick compacts and keeps the state", view(r4))
     r5 : R.Runner<String> <- opened(path, 100n)
-    closed("next=2 pending=0 running=0 tries=0 fails=0", "reopen after automatic compaction replays the same state", view(r5))
+    closed("next=2 pending=0 running=0 tries=0 fails=0 dead=1", "reopen after automatic compaction replays the same state", view(r5))
 
 def found.hex(m: Maybe<&2, R.State<String>>) -> String:
   match m:
@@ -436,7 +479,7 @@ def crash.snapshot(+dir: String) -> IO(Unit):
     R.close(String, r2)
     r3 : R.Runner<String> <- opened(path, 100n)
     r4 : R.Runner<String> <- held(state.hex(R.state(String, r3)), want, "a later compaction replaces the stale snapshot and keeps the state")
-    r5 : R.Runner<String> <- held(view(r4), "next=2 pending=1 running=0 tries=1 fails=0", "x stays complete, and y waits")
+    r5 : R.Runner<String> <- held(view(r4), "next=2 pending=1 running=0 tries=1 fails=0 dead=0", "x stays complete, and y waits")
     z : R.Ran(String) <- R.cancel(~String, ~penc, r5, 1n)
     r6 : R.Runner<String> <- ran(z)
     r7 : R.Runner<String> <- drain(r6)
@@ -452,7 +495,7 @@ def crash.compacted(+dir: String) -> IO(Unit):
     c : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("bend", ["crash.bend", "compacted", path], "", 65536, 120000)
     ok(U32.is_eq(status(c), 9), "the child dies inside an attempt after compaction")
     r0 : R.Runner<String> <- opened(path, 100n)
-    r1 : R.Runner<String> <- held(view(r0), "next=2 pending=1 running=0 tries=1 fails=1", "reopen requeues the running z, and x stays complete")
+    r1 : R.Runner<String> <- held(view(r0), "next=2 pending=1 running=0 tries=1 fails=1 dead=0", "reopen requeues the running z, and x stays complete")
     r2 : R.Runner<String> <- drain(r1)
     R.close(String, r2)
     xs : List<&2, String> <- read(log)
@@ -495,7 +538,7 @@ def overlap(+dir: String) -> IO(Unit):
     r6 : R.Runner<String> <- enq(r5, 0n, log ++ "|ok:f5")
     t : R.Runner<String> & R.Out(Bool) <- R.tick(~String, ~penc, ~target, ~work, r6)
     r7 : R.Runner<String> <- ticked(t)
-    closed("next=6 pending=0 running=0 tries=0 fails=0", "one tick runs a slow job and five fast jobs", view(r7))
+    closed("next=6 pending=0 running=0 tries=0 fails=0 dead=0", "one tick runs a slow job and five fast jobs", view(r7))
     +ys : List<&2, String> <- read(log)
     same(Nat.show(peak(ys, 0n, 0n)), "2", "no more attempts run at once than the capacity")
     same(last(ys, ""), "end slow:s", "the fast jobs finish while the slow job runs")

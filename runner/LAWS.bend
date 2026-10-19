@@ -110,7 +110,15 @@ def has(-A: Data, h: H.Heap<Q.Ticket<A>>, +i: Nat) -> Bool:
     case H.HNode{n, t, l, r}:
       Bool.or(Nat.is_eq(Q.id(A, t), i), Bool.or(has(A, l, i), has(A, r, i)))
 
-# Ticket i was running in s when it completed: issued (below s's next id) and not pending.
+# Whether a dead ticket with id i is in ds.
+def has.dead(-A: Data, ds: List<&2, R.Dead<A>>, +i: Nat) -> Bool:
+  match ds:
+    case Nil{}:
+      False{}
+    case Con{d, rest}:
+      Bool.or(Nat.is_eq(R.dead.id(A, d), i), has.dead(A, rest, i))
+
+# Ticket i was running in s when it completed: issued (below s's next id), not pending, and not dead.
 # Complete then takes it from the running list, and any ops run after.
 law complete_never_selected:
   for ~A: Data
@@ -118,13 +126,14 @@ law complete_never_selected:
   for s: R.State<A>
   for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
   for idle: {has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}
+  for alive: {has.dead(A, R.dead(A, s), i) == False{} : Bool}
   for ops: List<&2, R.Op<A>>
   for now: Nat
   for t: Q.Ticket<A>
   for e: {next(~A, now, live(~A, ops, R.step(~A, s, R.Complete{i}))) == Some{t} : Maybe<&2, Q.Ticket<A>>}
   {Nat.is_eq(Q.id(A, t), i) == False{} : Bool}
 
-# Cancel takes ticket i from both registries, so it needs no hypothesis but issue.
+# Cancel takes ticket i from every registry, so it needs no hypothesis but issue.
 law cancel_never_selected:
   for ~A: Data
   for +i: Nat
@@ -147,12 +156,44 @@ law recovered_never_selected:
   for +s: R.State<A>
   for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
   for idle: {has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}
+  for alive: {has.dead(A, R.dead(A, s), i) == False{} : Bool}
   for +ops: List<&2, R.Op<A>>
   for r: R.State<A>
   for back: {replayed(~A, ~X, ~enc, ~dec, ops, R.step(~A, s, R.Complete{i})) == Some{r} : Maybe<&2, R.State<A>>}
   for now: Nat
   for t: Q.Ticket<A>
   for e: {next(~A, now, r) == Some{t} : Maybe<&2, Q.Ticket<A>>}
+  {Nat.is_eq(Q.id(A, t), i) == False{} : Bool}
+
+# Whether op revives ticket i.
+def revived(-A: Data, op: R.Op<A>, +i: Nat) -> Bool:
+  match op:
+    case R.Revive{j, d}:
+      Nat.is_eq(j, i)
+    case _:
+      False{}
+
+# Whether some op in ops revives ticket i.
+def revives(-A: Data, ops: List<&2, R.Op<A>>, +i: Nat) -> Bool:
+  match ops:
+    case Nil{}:
+      False{}
+    case Con{+op, rest}:
+      Bool.or(revived(A, op, i), revives(A, rest, i))
+
+# Ticket i was running in s when retry gave up on it. It stays dead, and no Select takes it, until a Revive of i.
+law dead_never_selected:
+  for ~A: Data
+  for +i: Nat
+  for s: R.State<A>
+  for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
+  for idle: {has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}
+  for w: R.Why
+  for ops: List<&2, R.Op<A>>
+  for kept: {revives(A, ops, i) == False{} : Bool}
+  for now: Nat
+  for t: Q.Ticket<A>
+  for e: {next(~A, now, live(~A, ops, R.step(~A, s, R.Abandon{i, w}))) == Some{t} : Maybe<&2, Q.Ticket<A>>}
   {Nat.is_eq(Q.id(A, t), i) == False{} : Bool}
 
 # ---- the pool bounds the attempts
@@ -234,15 +275,37 @@ law requeue_wait:
   for e: {Retry.plan(o, p, b, n, now, r) == Retry.PlanWait{w} : Retry.Plan}
   {R.after(A, o, p, b, id, n, now, r) == R.Requeue{id, Nat.add(now, w)} : R.Op<A>}
 
-# When retry.plan stops, the ticket completes.
-law requeue_stop:
+# A settled attempt completes its ticket.
+law settled_complete:
   for -A: Data
-  for o: Retry.Outcome
   for p: Retry.Policy
   for b: Retry.Budget
   for +id: Nat
   for +n: Nat
   for +now: Nat
   for +r: Nat
-  for e: {Retry.plan(o, p, b, n, now, r) == Retry.PlanStop{} : Retry.Plan}
-  {R.after(A, o, p, b, id, n, now, r) == R.Complete{id} : R.Op<A>}
+  {R.after(A, Retry.Settled{}, p, b, id, n, now, r) == R.Complete{id} : R.Op<A>}
+
+# An unsafe failure must not repeat, so its ticket is dead.
+law unsafe_abandon:
+  for -A: Data
+  for p: Retry.Policy
+  for b: Retry.Budget
+  for +id: Nat
+  for +n: Nat
+  for +now: Nat
+  for +r: Nat
+  {R.after(A, Retry.Unsafe{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyUnsafe{}} : R.Op<A>}
+
+# When retry.plan stops a transient failure, its ticket is dead: spent when no attempt is left, else late.
+law transient_abandon:
+  for -A: Data
+  for a: Maybe<&2, Nat>
+  for p: Retry.Policy
+  for b: Retry.Budget
+  for +id: Nat
+  for +n: Nat
+  for +now: Nat
+  for +r: Nat
+  for e: {Retry.plan(Retry.Transient{a}, p, b, n, now, r) == Retry.PlanStop{} : Retry.Plan}
+  {R.after(A, Retry.Transient{a}, p, b, id, n, now, r) == R.Abandon{id, R.gave(b)} : R.Op<A>}

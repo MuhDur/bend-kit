@@ -10,9 +10,20 @@ import bend-kit-collections@0.1.3.0/heap.bend as H
 import bend-kit-collections@0.1.3.0/omap.bend as O
 import bend-kit-files@0.2.0.0/files.bend as Files
 
+# Why retry gave up on a ticket: its budget was spent, its deadline passed, or its failure must not repeat.
+type Why is Data:
+  WhySpent{}
+  WhyLate{}
+  WhyUnsafe{}
+
+# A ticket that retry gave up on, with its payload. It stays until Revive or Cancel takes it.
+type Dead<-A: Data> is Data:
+  Dead{ticket: Q.Ticket<A>, why: Why}
+
 # One queue transition. Each one is one journal record, appended before the state changes.
 # Select: the queue's select at now. Replay runs it at the same now, so it takes the same ticket.
 # Requeue: the attempt failed; it counts one failure. Defer: the breaker held the ticket back; no attempt ran.
+# Abandon: retry gave up; the running ticket becomes dead. Revive: a dead ticket is pending again at deadline, with a new budget.
 type Op<-A: Data> is Data:
   Enqueue{deadline: Nat, payload: A}
   Select{now: Nat}
@@ -20,29 +31,82 @@ type Op<-A: Data> is Data:
   Cancel{id: Nat}
   Requeue{id: Nat, deadline: Nat}
   Defer{id: Nat, deadline: Nat}
+  Abandon{id: Nat, why: Why}
+  Revive{id: Nat, deadline: Nat}
 
 # The failed attempts of a ticket, and its first deadline, from which the policy deadline counts.
 type Try is Data:
   Try{fails: Nat, start: Nat}
 
-# A Try for each ticket that is not yet complete or cancelled, by ticket id.
+# A Try for each ticket that is not yet complete, cancelled, or dead, by ticket id.
 def Tries() -> Data:
   O.OMap<Nat, Try>
 
-# The durable state: the queue and the tries.
+# The durable state: the queue, the tries, and the dead tickets, newest first.
 type State<-A: Data> is Data:
-  State{queue: Q.State<A>, tries: Tries()}
+  State{queue: Q.State<A>, tries: Tries(), dead: List<&2, Dead<A>>}
 
 def new(-A: Data) -> State<A>:
-  State{Q.new(A), O.OMap.new(Nat, Try)}
+  State{Q.new(A), O.OMap.new(Nat, Try), Nil{}}
 
 def queue(-A: Data, s: State<A>) -> Q.State<A>:
-  State{q, ts} = s
+  State{q, ts, ds} = s
   q
 
 def tries(-A: Data, s: State<A>) -> Tries():
-  State{q, ts} = s
+  State{q, ts, ds} = s
   ts
+
+# The dead tickets, newest first. A Revive of one makes it pending again; a Cancel drops it.
+def dead(-A: Data, s: State<A>) -> List<&2, Dead<A>>:
+  State{q, ts, ds} = s
+  ds
+
+# ---- dead tickets
+
+def dead.id(-A: Data, d: Dead<A>) -> Nat:
+  match d:
+    case Dead{t, w}:
+      Q.id(A, t)
+
+def dead.remove.keep(-A: Data, b: Bool, d: Dead<A>, rest: List<&2, Dead<A>>) -> List<&2, Dead<A>>:
+  match b:
+    case True{}:
+      rest
+    case False{}:
+      Con{d, rest}
+
+# The dead tickets without ticket i.
+def dead.remove(-A: Data, ds: List<&2, Dead<A>>, +i: Nat) -> List<&2, Dead<A>>:
+  match ds:
+    case Nil{}:
+      Nil{}
+    case Con{+d, rest}:
+      dead.remove.keep(A, Nat.is_eq(dead.id(A, d), i), d, dead.remove(A, rest, i))
+
+def dead.find.choose(-A: Data, b: Bool, d: Dead<A>, rest: Maybe<&2, Q.Ticket<A>>) -> Maybe<&2, Q.Ticket<A>>:
+  match b:
+    case True{}:
+      match d:
+        case Dead{t, w}:
+          Some{t}
+    case False{}:
+      rest
+
+# The ticket of dead ticket i.
+def dead.find(-A: Data, ds: List<&2, Dead<A>>, +i: Nat) -> Maybe<&2, Q.Ticket<A>>:
+  match ds:
+    case Nil{}:
+      None{}
+    case Con{+d, rest}:
+      dead.find.choose(A, Nat.is_eq(dead.id(A, d), i), d, dead.find(A, rest, i))
+
+def dead.bury(-A: Data, m: Maybe<&2, Q.Ticket<A>>, ds: List<&2, Dead<A>>, w: Why) -> List<&2, Dead<A>>:
+  match m:
+    case None{}:
+      ds
+    case Some{t}:
+      Con{Dead{t, w}, ds}
 
 # ---- tries
 
@@ -64,38 +128,54 @@ def tries.bump(+ts: Tries(), +i: Nat) -> Tries():
 
 # ---- the transition
 
-def step.enqueued(-A: Data, r: Q.State<A> & Nat, ts: Tries(), d: Nat) -> State<A>:
+def step.enqueued(-A: Data, r: Q.State<A> & Nat, ts: Tries(), ds: List<&2, Dead<A>>, d: Nat) -> State<A>:
   (q, i) = r
-  State{q, O.OMap.put(~Nat, ~Try, ~Nat.cmp, ts, i, Try{0n, d})}
+  State{q, O.OMap.put(~Nat, ~Try, ~Nat.cmp, ts, i, Try{0n, d}), ds}
 
-def step.selected(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: Tries()) -> State<A>:
+def step.selected(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: Tries(), ds: List<&2, Dead<A>>) -> State<A>:
   (q, t) = r
-  State{q, ts}
+  State{q, ts, ds}
 
-def step.requeued(-A: Data, r: Q.State<A> & Bool, ts: Tries()) -> State<A>:
+def step.requeued(-A: Data, r: Q.State<A> & Bool, ts: Tries(), ds: List<&2, Dead<A>>) -> State<A>:
   (q, b) = r
-  State{q, ts}
+  State{q, ts, ds}
 
 # Complete takes the ticket from the running list only: O(running), not O(pending).
-def step.completed(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: Tries()) -> State<A>:
+def step.completed(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: Tries(), ds: List<&2, Dead<A>>) -> State<A>:
   (q, t) = r
-  State{q, ts}
+  State{q, ts, ds}
+
+# Abandon takes the ticket from the running list, as Complete does, and keeps it with its payload.
+def step.abandoned(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: Tries(), ds: List<&2, Dead<A>>, w: Why) -> State<A>:
+  (q, t) = r
+  State{q, ts, dead.bury(A, t, ds, w)}
+
+def step.revived(~A: Data, m: Maybe<&2, Q.Ticket<A>>, n: Nat, h: H.Heap<Q.Ticket<A>>, r: List<&2, Q.Ticket<A>>, ts: Tries(), ds: List<&2, Dead<A>>, +d: Nat) -> State<A>:
+  match m:
+    case None{}:
+      State{Q.State{n, h, r}, ts, ds}
+    case Some{Q.Ticket{+i, old, x}}:
+      State{Q.State{n, H.Heap.push(~Q.Ticket<A>, ~(a => b => Q.le(A, a, b)), Q.Ticket{i, d, x}, h), r}, O.OMap.put(~Nat, ~Try, ~Nat.cmp, ts, i, Try{0n, d}), ds}
 
 # The state after op. Live and replay both run it, so they agree.
 def step(~A: Data, s: State<A>, op: Op<A>) -> State<A>:
   match s op:
-    case State{q, ts} Enqueue{+d, x}:
-      step.enqueued(A, Q.enqueue(~A, d, x, q), ts, d)
-    case State{q, ts} Select{now}:
-      step.selected(A, Q.select(~A, now, q), ts)
-    case State{q, ts} Complete{+i}:
-      step.completed(A, Q.complete(A, i, q), tries.drop(ts, i))
-    case State{q, ts} Cancel{+i}:
-      State{Q.cancel(~A, i, q), tries.drop(ts, i)}
-    case State{q, ts} Requeue{+i, d}:
-      step.requeued(A, Q.requeue(~A, i, d, q), tries.bump(ts, i))
-    case State{q, ts} Defer{i, d}:
-      step.requeued(A, Q.requeue(~A, i, d, q), ts)
+    case State{q, ts, ds} Enqueue{+d, x}:
+      step.enqueued(A, Q.enqueue(~A, d, x, q), ts, ds, d)
+    case State{q, ts, ds} Select{now}:
+      step.selected(A, Q.select(~A, now, q), ts, ds)
+    case State{q, ts, ds} Complete{+i}:
+      step.completed(A, Q.complete(A, i, q), tries.drop(ts, i), ds)
+    case State{q, ts, ds} Cancel{+i}:
+      State{Q.cancel(~A, i, q), tries.drop(ts, i), dead.remove(A, ds, i)}
+    case State{q, ts, ds} Requeue{+i, d}:
+      step.requeued(A, Q.requeue(~A, i, d, q), tries.bump(ts, i), ds)
+    case State{q, ts, ds} Defer{i, d}:
+      step.requeued(A, Q.requeue(~A, i, d, q), ts, ds)
+    case State{q, ts, ds} Abandon{+i, w}:
+      step.abandoned(A, Q.complete(A, i, q), tries.drop(ts, i), ds, w)
+    case State{Q.State{n, h, r}, ts, +ds} Revive{+i, d}:
+      step.revived(~A, dead.find(A, ds, i), n, h, r, ts, dead.remove(A, ds, i), d)
 
 def apply.op(~A: Data, m: Maybe<&2, Op<A>>, s: State<A>) -> Maybe<&2, State<A>>:
   match m:
@@ -162,7 +242,7 @@ def pick.sel(-A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, p: Res.Pool) -> P
 
 # The ticket that Select{now} takes, with one unit of p, when there is a ticket due and a unit free.
 def pick(~A: Data, p: Res.Pool, s: State<A>, now: Nat) -> Pick<A>:
-  State{q, ts} = s
+  State{q, ts, ds} = s
   pick.sel(A, Q.select(~A, now, q), p)
 
 # ---- retry
@@ -189,16 +269,36 @@ def fails(t: Maybe<&2, Try>) -> Nat:
     case Some{Try{f, st}}:
       f
 
-def after.plan(-A: Data, pl: Retry.Plan, +id: Nat, +now: Nat) -> Op<A>:
+# Why retry stopped a transient failure: no attempt is left, or the next wait would reach the deadline.
+def gave(b: Retry.Budget) -> Why:
+  Retry.Budget{left, d} = b
+  match left:
+    case 0n:
+      WhySpent{}
+    case 1n+k:
+      WhyLate{}
+
+# A settled attempt completes its ticket; retry gave up on any other.
+def stopped(-A: Data, o: Retry.Outcome, b: Retry.Budget, +id: Nat) -> Op<A>:
+  match o:
+    case Retry.Settled{}:
+      Complete{id}
+    case Retry.Unsafe{}:
+      Abandon{id, WhyUnsafe{}}
+    case Retry.Transient{w}:
+      Abandon{id, gave(b)}
+
+def after.plan(-A: Data, pl: Retry.Plan, o: Retry.Outcome, b: Retry.Budget, +id: Nat, +now: Nat) -> Op<A>:
   match pl:
     case Retry.PlanStop{}:
-      Complete{id}
+      stopped(A, o, b, id)
     case Retry.PlanWait{w}:
       Requeue{id, Nat.add(now, w)}
 
-# The record after an attempt of ticket id ends at now with o: requeue at now plus retry's wait, or complete.
-def after(-A: Data, o: Retry.Outcome, p: Retry.Policy, b: Retry.Budget, +id: Nat, +n: Nat, +now: Nat, +r: Nat) -> Op<A>:
-  after.plan(A, Retry.plan(o, p, b, n, now, r), id, now)
+# The record after an attempt of ticket id ends at now with o: requeue at now plus retry's wait,
+# complete when o is settled, or abandon when retry gave up.
+def after(-A: Data, +o: Retry.Outcome, p: Retry.Policy, +b: Retry.Budget, +id: Nat, +n: Nat, +now: Nat, +r: Nat) -> Op<A>:
+  after.plan(A, Retry.plan(o, p, b, n, now, r), o, b, id, now)
 
 # When an open breaker lets attempts start again.
 def until(br: Retry.Breaker, +now: Nat) -> Nat:
@@ -212,17 +312,26 @@ def until(br: Retry.Breaker, +now: Nat) -> Nat:
     case Retry.BreakerOff{}:
       now
 
-# The record for a ticket that admit refused: Defer to when the breaker may admit, or Complete when its budget is spent or late.
+# The record for a ticket that admit refused: Defer to when the breaker may admit, or Abandon when its budget is spent or late.
 def held(-A: Data, why: Retry.Deny, br: Retry.Breaker, +id: Nat, +now: Nat) -> Op<A>:
   match why:
     case Retry.DenyOpen{}:
       Defer{id, until(br, now)}
     case Retry.DenyLate{}:
-      Complete{id}
+      Abandon{id, WhyLate{}}
     case Retry.DenySpent{}:
-      Complete{id}
+      Abandon{id, WhySpent{}}
 
-# ---- the record codec: a u32le tag, then u64le fields; an Enqueue then holds the payload.
+# ---- the record codec: a u32le tag, then u64le fields; an Enqueue then holds the payload. An Abandon's second field is why.code.
+
+def why.code(w: Why) -> Nat:
+  match w:
+    case WhySpent{}:
+      0n
+    case WhyLate{}:
+      1n
+    case WhyUnsafe{}:
+      2n
 
 def W() -> Nat:
   Nat.mul(65536n, 65536n)
@@ -248,6 +357,10 @@ def encode(~A: Data, ~penc: A -> Bytes.Bytes, op: Op<A>) -> Bytes.Bytes:
       head(5, i, d)
     case Defer{+i, +d}:
       head(6, i, d)
+    case Abandon{+i, w}:
+      head(8, i, why.code(w))
+    case Revive{+i, +d}:
+      head(9, i, d)
 
 def get.field(m: Maybe<&2, U32>) -> U32:
   match m:
@@ -272,6 +385,12 @@ def get.lo(+at: U32, r: Bytes.Bytes & Maybe<&2, U32>) -> Bytes.Bytes & Nat:
 def get.u64(b: Bytes.Bytes, +at: U32) -> Bytes.Bytes & Nat:
   get.lo(at, Bytes.get.u32le(b, at))
 
+# The Abandon of ticket a whose why.code is c, or None for any other code.
+def decode.abandon(-A: Data, +a: Nat, +c: Nat) -> Maybe<&2, Op<A>>:
+  Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 0n), Some{Abandon{a, WhySpent{}}},
+  Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 1n), Some{Abandon{a, WhyLate{}}},
+  Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 2n), Some{Abandon{a, WhyUnsafe{}}}, None{})))
+
 def decode.small(-A: Data, ok: Bool, +tag: U32, +a: Nat, +c: Nat) -> Maybe<&2, Op<A>>:
   match ok:
     case False{}:
@@ -281,7 +400,9 @@ def decode.small(-A: Data, ok: Bool, +tag: U32, +a: Nat, +c: Nat) -> Maybe<&2, O
       Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 3), Some{Complete{a}},
       Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 4), Some{Cancel{a}},
       Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 5), Some{Requeue{a, c}},
-      Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 6), Some{Defer{a, c}}, None{})))))
+      Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 6), Some{Defer{a, c}},
+      Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 8), decode.abandon(A, a, c),
+      Bool.pick(Maybe<&2, Op<A>>, U32.is_eq(tag, 9), Some{Revive{a, c}}, None{})))))))
 
 def decode.payload(-A: Data, m: Maybe<&2, A>, +d: Nat) -> Maybe<&2, Op<A>>:
   match m:
@@ -321,9 +442,9 @@ def decode(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, b: Bytes.Bytes) -> Mayb
   Bytes.Bytes{+len, buf} = b
   decode.len(~A, ~pdec, U32.is_ge(len, 12), len, Bytes.Bytes{len, buf})
 
-# ---- the snapshot codec: tag 7 and the next id, then the heap, the running list, and the tries.
+# ---- the snapshot codec: tag 7 and the next id, then the heap, the running list, the tries, and the dead tickets.
 # A u32 flag starts each tree node and list cell (1) and marks each end (0), so decode rebuilds the same shape.
-# A ticket is its u64 id and deadline, then a u32 length and the payload.
+# A ticket is its u64 id and deadline, then a u32 length and the payload. A dead ticket is its ticket, then a u32 why.code.
 
 def snap.u32(out: Bytes.Bytes, +v: U32) -> Bytes.Bytes:
   Bytes.append(out, Bytes.set.u32le(Bytes.new(4), 0, v))
@@ -360,10 +481,17 @@ def snap.tries(ts: Tries(), out: Bytes.Bytes) -> Bytes.Bytes:
     case O.OBin{+n, +k, Try{+f, +st}, lo, hi}:
       snap.tries(hi, snap.tries(lo, snap.u64(snap.u64(snap.u64(snap.u32(snap.u32(out, 1), n), k), f), st)))
 
+def snap.dead(~A: Data, ~penc: A -> Bytes.Bytes, ds: List<&2, Dead<A>>, out: Bytes.Bytes) -> Bytes.Bytes:
+  match ds:
+    case Nil{}:
+      snap.u32(out, 0)
+    case Con{Dead{t, w}, rest}:
+      snap.dead(~A, ~penc, rest, snap.u32(snap.ticket(~A, ~penc, snap.u32(out, 1), t), U32.from_nat(why.code(w))))
+
 # The Snap record of s.
 def encode.snap(~A: Data, ~penc: A -> Bytes.Bytes, s: State<A>) -> Bytes.Bytes:
-  State{Q.State{+n, h, run}, ts} = s
-  snap.tries(ts, snap.run(~A, ~penc, run, snap.heap(~A, ~penc, h, snap.u64(snap.u32(Bytes.new(0), 7), n))))
+  State{Q.State{+n, h, run}, ts, ds} = s
+  snap.dead(~A, ~penc, ds, snap.tries(ts, snap.run(~A, ~penc, run, snap.heap(~A, ~penc, h, snap.u64(snap.u32(Bytes.new(0), 7), n)))))
 
 def encode.rec(~A: Data, ~penc: A -> Bytes.Bytes, r: Rec<A>) -> Bytes.Bytes:
   match r:
@@ -512,6 +640,26 @@ def rd.tries(+fuel: Nat, node: Bool) -> Dec(O.OMap<Nat, Try>):
         hi : O.OMap<Nat, Try> <- rd.tries(f, hf)
         return O.OBin{n, k, Try{fails, st}, lo, hi}
 
+def rd.why(+c: U32) -> Dec(Why):
+  Bool.pick(Dec(Why), U32.is_eq(c, 0), Dec.pure(Why, WhySpent{}),
+  Bool.pick(Dec(Why), U32.is_eq(c, 1), Dec.pure(Why, WhyLate{}),
+  Bool.pick(Dec(Why), U32.is_eq(c, 2), Dec.pure(Why, WhyUnsafe{}), Dec.fail(Why))))
+
+def rd.dead(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat, more: Bool) -> Dec(List<&2, Dead<A>>):
+  match fuel more:
+    case 0n b:
+      Dec.fail(List<&2, Dead<A>>)
+    case 1n+f False{}:
+      Dec.pure(List<&2, Dead<A>>, Nil{})
+    case 1n+f True{}:
+      do Dec<List<&2, Dead<A>>>:
+        t : Q.Ticket<A> <- rd.ticket(~A, ~pdec)
+        c : U32 <- rd.u32()
+        w : Why <- rd.why(c)
+        m : Bool <- rd.flag()
+        rest : List<&2, Dead<A>> <- rd.dead(~A, ~pdec, f, m)
+        return Con{Dead{t, w}, rest}
+
 def rd.state(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat) -> Dec(State<A>):
   do Dec<State<A>>:
     n : Nat <- rd.u64()
@@ -521,7 +669,9 @@ def rd.state(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat) -> Dec(St
     run : List<&2, Q.Ticket<A>> <- rd.run(~A, ~pdec, fuel, rf)
     tf : Bool <- rd.flag()
     ts : O.OMap<Nat, Try> <- rd.tries(fuel, tf)
-    return State{Q.State{n, h, run}, ts}
+    df : Bool <- rd.flag()
+    ds : List<&2, Dead<A>> <- rd.dead(~A, ~pdec, fuel, df)
+    return State{Q.State{n, h, run}, ts, ds}
 
 def decode.snap.end(-A: Data, +len: U32, m: Maybe<&1, Rd & State<A>>) -> Maybe<&2, State<A>>:
   match m:
@@ -815,13 +965,13 @@ def empty.list(-A: Data, xs: List<&2, Q.Ticket<A>>) -> Bool:
     case Con{t, rest}:
       False{}
 
-# No ticket is pending or running.
+# No ticket is pending or running. Dead tickets wait for a Revive, so they do not count.
 def idle(-A: Data, s: State<A>) -> Bool:
-  State{Q.State{n, h, run}, ts} = s
+  State{Q.State{n, h, run}, ts, ds} = s
   Bool.and(empty.heap(A, h), empty.list(A, run))
 
 def pending(-A: Data, s: State<A>) -> Nat:
-  State{Q.State{n, h, run}, ts} = s
+  State{Q.State{n, h, run}, ts, ds} = s
   H.Heap.size(Q.Ticket<A>, h)
 
 # ---- compaction
@@ -1087,9 +1237,14 @@ def enqueue(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>, +deadline: Nat, x: 
     y : Ran(A) <- commit(~A, ~penc, Runner{j, s, p, bs, c}, Enqueue{deadline, x})
     return enqueue.done(A, Q.next_id(A, queue(A, s)), y)
 
-# Cancels ticket id. A running attempt finishes, but its ticket is never selected again.
+# Cancels ticket id. A running attempt finishes, but its ticket is never selected again. A dead ticket is dropped.
 def cancel(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>, +id: Nat) -> IO(Ran(A)):
   commit(~A, ~penc, r, Cancel{id})
+
+# Makes dead ticket id pending again at deadline (wall-clock ms), with its payload and a new retry budget.
+# A ticket that is not dead does not change.
+def revive(~A: Data, ~penc: A -> Bytes.Bytes, r: Runner<A>, +id: Nat, +deadline: Nat) -> IO(Ran(A)):
+  commit(~A, ~penc, r, Revive{id, deadline})
 
 # The runner back, and a copy of its state.
 def state(-A: Data, r: Runner<A>) -> Runner<A> & State<A>:

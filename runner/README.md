@@ -3,7 +3,7 @@
 A durable job runner (an outbox). It keeps a scheduler queue in a journal, bounds the attempts that run at once with a resources pool, and retries failed jobs with retry's policy and a breaker per target.
 
 ```bend
-import bend-kit-runner@0.5.0.0/runner.bend as R
+import bend-kit-runner@0.6.0.0/runner.bend as R
 ```
 
 It imports `bend-kit-journal@0.2.0.0`, `bend-kit-scheduler@0.3.0.0`, `bend-kit-resources@0.1.0.0`, `bend-kit-retry@0.1.0.0`, `bend-kit-time@0.2.0.0`, `bend-kit-collections@0.1.3.0`, `bend-kit-files@0.2.0.0`, and `bend-kit-bytes@0.3.2.0`. Payload codecs take and give that version's `Bytes`. Policies, budgets, and outcomes are `bend-kit-retry@0.1.0.0` types; tickets are `bend-kit-scheduler@0.3.0.0` types.
@@ -29,7 +29,7 @@ A job is a `String`. `work` prints it and succeeds. The journal file keeps the j
 import Base
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-runner@0.5.0.0/runner.bend as R
+import bend-kit-runner@0.6.0.0/runner.bend as R
 
 def penc(s: String) -> Bytes.Bytes:
   Bytes.from_string(s)
@@ -83,11 +83,12 @@ def main() -> IO(Unit):
 |---|---|
 | `open(~A, ~penc, ~pdec, path, max, limit, config, capacity)` | Opens or creates the journal at `path` and replays it: from its snapshot, when it has one, then each op after it. Each ticket that was running is requeued at now as a failed attempt. `capacity` bounds the attempts that run at once. |
 | `enqueue(~A, ~penc, r, deadline, x)` | Adds a job due at `deadline` (wall-clock ms since the Unix epoch). Answers its ticket id once the record is durable. |
-| `cancel(~A, ~penc, r, id)` | Cancels a ticket. An attempt that runs finishes, but the ticket is never selected again. |
+| `cancel(~A, ~penc, r, id)` | Cancels a ticket. An attempt that runs finishes, but the ticket is never selected again. A dead ticket is dropped. |
+| `revive(~A, ~penc, r, id, deadline)` | Makes dead ticket `id` pending again at `deadline`, with its payload and a new retry budget. A ticket that is not dead does not change. |
 | `tick(~A, ~penc, ~target, ~work, r)` | One round: start an attempt for each due ticket that the pool admits. As each attempt finishes, record its outcome, give back its unit, and start the next due ticket in that unit. The round ends when no attempt runs. Then compact when the journal grew past `compact`. `Done{True}` when an attempt ran. |
 | `drain(~A, ~penc, ~target, ~work, fuel, r)` | Ticks until no ticket is pending or running, waiting `idle` ms after a round that started nothing. Fails after `fuel` rounds with work left. |
 | `compact(~A, ~penc, r)` | Replaces the journal with one snapshot record of the state. See [Compaction](#compaction). |
-| `state(A, r)` | The runner and a copy of its `State`. |
+| `state(A, r)` | The runner and a copy of its `State`. `dead(A, s)` lists the dead tickets of a `State`, newest first, each a `Dead{ticket, why}` with its payload. |
 | `close(A, r)` | Closes the journal. |
 
 `Config{policy, circuit, idle, compact}`: retry's `Policy` for every ticket, the `Circuit` of each target's breaker, `drain`'s wait, and the octets of records that `tick` lets the journal grow by, since open or the last compaction, before it compacts. A `compact` of 0 turns automatic compaction off. `max` caps one op record's octets and `limit` caps the journal file and a snapshot, as in `journal`. A failed append stops the runner: every later call fails until it is reopened.
@@ -100,20 +101,22 @@ Every transition is one journal record, appended and fsynced before the state ch
 |---|---|---|
 | `Enqueue{deadline, x}` | `enqueue` | `Queue.enqueue`, and a `Try{0, deadline}` under the new id |
 | `Select{now}` | a due ticket and a free pool unit | `Queue.select(now)`. Replay runs it at the same `now`, so it takes the same ticket. |
-| `Complete{id}` | the attempt settled, or retry stopped | `Queue.complete(id)`, which takes the ticket from the running list, and the `Try` is dropped |
-| `Cancel{id}` | `cancel` | `Queue.cancel(id)`, which takes the ticket from both registries, and the `Try` is dropped |
+| `Complete{id}` | the attempt settled | `Queue.complete(id)`, which takes the ticket from the running list, and the `Try` is dropped |
+| `Cancel{id}` | `cancel` | `Queue.cancel(id)`, which takes the ticket from both registries; the dead ticket `id` is dropped, and so is the `Try` |
 | `Requeue{id, d}` | the attempt failed, or a crash interrupted it | `Queue.requeue(id, d)`, one more failure in the `Try` |
 | `Defer{id, d}` | the target's breaker is open | `Queue.requeue(id, d)`, no failure counted |
+| `Abandon{id, why}` | retry gave up: the budget is spent (`WhySpent`), the deadline passed (`WhyLate`), or the failure was `Unsafe` (`WhyUnsafe`) | `Queue.complete(id)`, and the ticket, with its payload, goes to the dead tickets; the `Try` is dropped |
+| `Revive{id, d}` | `revive` | the dead ticket `id` goes back to the pending heap at `d`, with a `Try{0, d}` |
 
-The record is a u32le tag (1 to 6), then u64le fields, then the payload for `Enqueue`. A ticket's budget is the policy's attempts less its failures, and its deadline is the policy deadline after its first due time. `Select` is journaled so that the replayed queue equals the live one, running list included.
+The record is a u32le tag (1 to 6, 8, or 9), then u64le fields, then the payload for `Enqueue`. An `Abandon`'s second field is its why: 0 spent, 1 late, 2 unsafe. A ticket's budget is the policy's attempts less its failures, and its deadline is the policy deadline after its first due time. `Select` is journaled so that the replayed queue equals the live one, running list included. A dead ticket is neither pending nor running, so `drain` does not wait for it.
 
 ### Compaction
 
-Completed jobs keep their records, so a journal grows with its history. `compact` writes the live state, the queue and the tries, as one `Snap` record into `path.compact`, fsyncs it, renames it over `path`, and reopens `path`, which fsyncs the directory. `open` replays the snapshot, then the ops after it.
+Completed jobs keep their records, so a journal grows with its history. `compact` writes the live state, the queue, the tries, and the dead tickets, as one `Snap` record into `path.compact`, fsyncs it, renames it over `path`, and reopens `path`, which fsyncs the directory. `open` replays the snapshot, then the ops after it.
 
 A crash leaves either the old journal or the new one, and both replay to the same state. A leftover `path.compact` is removed by the next compaction. When compaction fails before the rename, the old journal stands and the runner goes on. When it fails after the rename, appends stop until the runner is reopened.
 
-A `Snap` record is tag 7 and the next id, then the pending heap, the running list, and the tries, node by node, so the replayed trees have the live shape. Each node or cell starts with a u32 flag of 1, and each end is a flag of 0. A ticket is its u64 id and deadline, then a u32 length and the payload. The snapshot is one record, so it must fit `limit`, not `max`.
+A `Snap` record is tag 7 and the next id, then the pending heap, the running list, the tries, and the dead tickets, node by node, so the replayed trees have the live shape. Each node or cell starts with a u32 flag of 1, and each end is a flag of 0. A ticket is its u64 id and deadline, then a u32 length and the payload; a dead ticket then has a u32 why. The snapshot is one record, so it must fit `limit`, not `max`.
 
 ## Laws
 
@@ -124,14 +127,17 @@ A `Snap` record is tag 7 and the next id, then the pending heap, the running lis
 | `replay_live` | When every record decodes to its op, replaying the records of any ops gives the state that applying them live gives. |
 | `replay_prefix` | The same for the first `k` ops: the committed prefix that recovery keeps after a crash. |
 | `replay_snapshot` | When every record decodes to itself, replaying a snapshot of `live(ops, s)` and then the records of `more` gives `live(more, live(ops, s))`, from any start state. |
-| `complete_never_selected` | After `Complete{i}` and any ops, no `Select` takes ticket `i`. It assumes `i` was issued and was not pending, as a running ticket is. |
+| `complete_never_selected` | After `Complete{i}` and any ops, no `Select` takes ticket `i`. It assumes `i` was issued and was neither pending nor dead, as a running ticket is. |
 | `cancel_never_selected` | After `Cancel{i}` and any ops, no `Select` takes ticket `i`, when `i` was issued. |
 | `recovered_never_selected` | The `Complete` claim for the state that `open` replays from the journal. |
+| `dead_never_selected` | After `Abandon{i, why}` and any ops with no `Revive` of `i`, no `Select` takes ticket `i`. It assumes `i` was issued and was not pending. |
 | `pick_holds_one` | A picked attempt holds exactly one more pool unit; an idle pick holds none. |
 | `pick_bounded` | The units held after a pick never exceed the capacity. |
 | `pick_release` | Releasing a picked grant once gives back the pool as it was before the pick. |
 | `requeue_wait` | When `retry.plan` waits `w`, the record is `Requeue{id, now + w}`. |
-| `requeue_stop` | When `retry.plan` stops, the record is `Complete{id}`. |
+| `settled_complete` | A `Settled` attempt gives `Complete{id}`. |
+| `unsafe_abandon` | An `Unsafe` attempt gives `Abandon{id, WhyUnsafe}`. |
+| `transient_abandon` | When `retry.plan` stops a `Transient` failure, the record is `Abandon{id, gave(b)}`: `WhySpent` when no attempt is left, else `WhyLate`. |
 
 `journal`'s `replay` and `roundtrip` laws give the other half of `replay_prefix`: `open` folds exactly the committed records, in order. `scheduler`'s laws give the queue's own behavior, such as `requeue_token`.
 
@@ -139,7 +145,8 @@ A `Snap` record is tag 7 and the next id, then the pending heap, the running lis
 
 - **Journal.** Durability is the journal's: a record is on disk when `append` answers `Done`, under the trust assumptions in [journal/README.md](../journal/README.md#trust-boundary).
 - **At least once.** A crash after `Select` and before `Complete` reruns the job at the next `open`. A crash after the job's effect and before `Complete` repeats the effect. Make jobs idempotent, as webhook receivers do with the event id.
-- **Codec.** The laws assume `pdec(penc(x)) == Some{x}` and that the op and snapshot codecs round-trip. `check.bend` tests the op codec on every op, including 41-bit deadlines, and the snapshot codec on a state with pending, running, and retried tickets. A record that does not decode fails `open` with `EINVAL` (22). Nat fields must stay under 2^64.
+- **Codec.** The laws assume `pdec(penc(x)) == Some{x}` and that the op and snapshot codecs round-trip. `check.bend` tests the op codec on every op, including 41-bit deadlines, and the snapshot codec on a state with pending, running, retried, and dead tickets. A record that does not decode fails `open` with `EINVAL` (22). Nat fields must stay under 2^64.
+- **Settled.** `Retry.Settled` is a success or a failure that another try would repeat. The runner cannot tell the two apart, so it completes both. Only `Unsafe` and a stopped `Transient` make a ticket dead.
 - **Wiring.** The laws cover the pure transitions. `open`, `tick`, and `drain` are IO that appends each op before it applies it, and gives each grant back after its attempt. `check.bend` tests that wiring, not a proof.
 - **Clock.** Deadlines are wall-clock ms, so they keep their meaning across restarts. A clock that jumps moves every due time with it.
 - **Breakers.** Breaker state lives in memory. A restart closes every breaker.
@@ -153,7 +160,7 @@ A `Snap` record is tag 7 and the next id, then the pending heap, the running lis
 
 - the op codec round-trips each op, and rejects short records and unknown tags;
 - the snapshot codec rebuilds the same state, and rejects a short snapshot, octets after it, and a bad flag;
-- three jobs drain: two run once, one fails every time and stops after the policy's 3 attempts; reopening replays the same state;
+- three jobs drain: two run once; one fails every time and is dead after the policy's 3 attempts, with its payload. Reopening replays the same state. A revive runs it 3 attempts more, and a cancel drops it;
 - a child process (`crash.bend`) completes job x, then dies inside job y's attempt. Reopening requeues y as a failed attempt, y runs again, and x does not;
 - two failing jobs open their target's breaker at the first failure; no third attempt starts, and the held jobs wait for the cooldown;
 - with capacity 2, one tick runs a slow job and five fast jobs: the fast jobs finish in the free unit while the slow one runs, and no more than 2 attempts run at once;
