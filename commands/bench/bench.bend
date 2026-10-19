@@ -1,0 +1,90 @@
+# commands benchmark: N new commands, then the same N again as duplicates, through commands.handle (see README.md).
+import Base
+import ../../time/time.bend as Time
+import ../commands.bend as C
+import bend-kit-sqlite@0.1.0.1/sqlite.bend as S
+
+def lcg(+x: U32) -> U32:
+  (x * 1664525 + 1013904223 : U32)
+
+def num(s: String) -> U32:
+  Maybe.default(&2, U32, U32.read(s), 0)
+
+# A running total: each payload is an amount, and the result is the new total.
+def decide(s: String, p: String) -> C.Decision<String, String, String>:
+  +t = (num(s) + num(p) : U32)
+  C.Accept{U32.show(t), U32.show(t), ["total=" ++ U32.show(t)]}
+
+def lap(name: String, t0: Time.Duration, t1: Time.Duration, +c: U32) -> IO(Unit):
+  IO.print(name ++ "\t" ++ Time.Duration.show_ms(Time.Duration.sub(t1, t0)) ++ "\t" ++ U32.show(c))
+
+# The result of an accepted reply of the wanted kind, or exit.
+def result(fresh: Bool, r: C.Reply<String>) -> IO(U32):
+  match fresh r:
+    case True{} C.Fresh{C.Accepted{s}}:
+      IO.pure(U32, num(s))
+    case False{} C.Replayed{C.Accepted{s}}:
+      IO.pure(U32, num(s))
+    case _ _:
+      IO.die(U32, 1, "unexpected reply")
+
+# Command i has id cmd_i and amount (x_i >> 1) % 1000, with x_0 = 1 and x_{i+1} = lcg(x_i). h = h*31 + result.
+def run(n: Nat, +fresh: Bool, +st: C.Store, +i: U32, +x: U32, +h: U32) -> IO(U32):
+  match n:
+    case 0n:
+      IO.pure(U32, h)
+    case 1n+p:
+      do IO<U32>:
+        r : C.Reply<String> <- IO.try(C.Reply<String>, C.handle(~decide, st, "cmd_" ++ U32.show(i), U32.show(((x >> 1n) % 1000 : U32)), 200))
+        +v : U32 <- result(fresh, r)
+        run(p, fresh, st, (i + 1 : U32), lcg(x), (h * 31 + v : U32))
+
+def rows.of(m: Maybe<&2, U32>) -> U32:
+  match m:
+    case None{}:
+      10000
+    case Some{n}:
+      n
+
+# The arguments are the database path and the command count.
+def args(xs: List<String>) -> String & U32:
+  match xs:
+    case Con{prog, Con{path, Con{s, rest}}}:
+      (path, rows.of(U32.read(s)))
+    case _:
+      ("out/bend.db", 10000)
+
+def bench(+st: C.Store, +n: U32) -> IO(Unit):
+  do IO<Unit>:
+    t0 : Time.Duration <- Time.mono()
+    f : U32 <- run(U32.to_nat(n), True{}, st, 0, 1, 0)
+    t1 : Time.Duration <- Time.mono()
+    total : String <- IO.try(String, C.state(st))
+    lap("fresh", t0, t1, num(total))
+    t2 : Time.Duration <- Time.mono()
+    +h : U32 <- run(U32.to_nat(n), False{}, st, 0, 1, 0)
+    t3 : Time.Duration <- Time.mono()
+    lap("replay", t2, t3, h)
+    IO.try(Unit, C.close(st))
+
+def version() -> IO(Unit):
+  do IO<Unit>:
+    +db : U32 <- IO.try(U32, S.db.open(":memory:"))
+    +q : U32 <- IO.try(U32, S.stmt.prepare(db, "SELECT sqlite_version()"))
+    row : Bool <- IO.try(Bool, S.stmt.step(q))
+    v : String <- IO.try(String, S.stmt.column.text(q, 0))
+    IO.print("sqlite\t" ++ v)
+    IO.try(Unit, S.stmt.finalize(q))
+    IO.try(Unit, S.db.close(db))
+
+def start(a: String & U32) -> IO(Unit):
+  (path, +n) = a
+  do IO<Unit>:
+    version()
+    +st : C.Store <- IO.try(C.Store, C.open(path, "0", 10000))
+    bench(st, n)
+
+def main() -> IO(Unit):
+  do IO<Unit>:
+    xs : List<String> <- IO.args()
+    start(args(xs))
