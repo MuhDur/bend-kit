@@ -1,6 +1,6 @@
 # Hairpin: an HTTP client with a base URL, default headers, a pool, cookies, mTLS, redirects, and proven retries. Source: https://github.com/paymog/bend-kit/tree/main/hairpin
 import Base
-import bend-kit-http@0.35.0.0/http.bend as Http
+import bend-kit-http@0.36.0.0/http.bend as Http
 import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-url@0.4.1.0/url.bend as Url
 import bend-kit-json@0.6.1.1/json.bend as Json
@@ -8,8 +8,9 @@ import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
 
 # base: "" for none. headers: lowercase names. ms: the step timeout. policy: attempts, backoff, and deadline of each request.
+# ca: a PEM CA file to trust; "" trusts the default store.
 type Opts is Data:
-  Opts{base: String, headers: Map<&2, List<&2, String>>, ms: U32, mode: Http.Mode, policy: Retry.Policy, cert: Maybe<&2, Http.Cert>}
+  Opts{base: String, headers: Map<&2, List<&2, String>>, ms: U32, mode: Http.Mode, policy: Retry.Policy, cert: Maybe<&2, Http.Cert>, ca: String}
 
 # breaker: the circuit breaker of every request on this client.
 type Client is Type:
@@ -27,37 +28,37 @@ def policy() -> Retry.Policy:
 # A pool of up to cap idle sockets per origin, no base, no default headers, 30 s steps, follow redirects,
 # no retries, and no circuit breaker.
 def new.with(+cap: U32) -> Client:
-  Client{Opts{"", Http.empty(), 30000, Http.ModeFollow{}, policy(), None{}}, Http.pool.new.with(cap), None{}, Retry.BreakerOff{}}
+  Client{Opts{"", Http.empty(), 30000, Http.ModeFollow{}, policy(), None{}, ""}, Http.pool.new.with(cap), None{}, Retry.BreakerOff{}}
 
 def new() -> Client:
   new.with(8)
 
 def base(c: Client, url: String) -> Client:
-  Client{Opts{b, h, ms, mode, p, cert}, pool, j, br} = c
-  Client{Opts{url, h, ms, mode, p, cert}, pool, j, br}
+  Client{Opts{b, h, ms, mode, p, cert, ca}, pool, j, br} = c
+  Client{Opts{url, h, ms, mode, p, cert, ca}, pool, j, br}
 
 # A default header. It replaces an earlier default of the same name; a request header of that name replaces it.
 def header(c: Client, k: String, v: String) -> Client:
-  Client{Opts{b, h, ms, mode, p, cert}, pool, j, br} = c
-  Client{Opts{b, Http.set(h, String.to_lower(k), v), ms, mode, p, cert}, pool, j, br}
+  Client{Opts{b, h, ms, mode, p, cert, ca}, pool, j, br} = c
+  Client{Opts{b, Http.set(h, String.to_lower(k), v), ms, mode, p, cert, ca}, pool, j, br}
 
 def timeout(c: Client, ms: U32) -> Client:
-  Client{Opts{b, h, old, mode, p, cert}, pool, j, br} = c
-  Client{Opts{b, h, ms, mode, p, cert}, pool, j, br}
+  Client{Opts{b, h, old, mode, p, cert, ca}, pool, j, br} = c
+  Client{Opts{b, h, ms, mode, p, cert, ca}, pool, j, br}
 
 def redirect(c: Client, mode: Http.Mode) -> Client:
-  Client{Opts{b, h, ms, old, p, cert}, pool, j, br} = c
-  Client{Opts{b, h, ms, mode, p, cert}, pool, j, br}
+  Client{Opts{b, h, ms, old, p, cert, ca}, pool, j, br} = c
+  Client{Opts{b, h, ms, mode, p, cert, ca}, pool, j, br}
 
 # Up to n retries after the first attempt: n + 1 attempts in all.
 def retry(c: Client, n: U32) -> Client:
-  Client{Opts{b, h, ms, mode, Retry.Policy{old, base, cap, d}, cert}, pool, j, br} = c
-  Client{Opts{b, h, ms, mode, Retry.Policy{1n+U32.to_nat(n), base, cap, d}, cert}, pool, j, br}
+  Client{Opts{b, h, ms, mode, Retry.Policy{old, base, cap, d}, cert, ca}, pool, j, br} = c
+  Client{Opts{b, h, ms, mode, Retry.Policy{1n+U32.to_nat(n), base, cap, d}, cert, ca}, pool, j, br}
 
 # No attempt of a request starts ms or more after the request starts.
 def deadline(c: Client, ms: U32) -> Client:
-  Client{Opts{b, h, t, mode, Retry.Policy{a, base, cap, old}, cert}, pool, j, br} = c
-  Client{Opts{b, h, t, mode, Retry.Policy{a, base, cap, Some{U32.to_nat(ms)}}, cert}, pool, j, br}
+  Client{Opts{b, h, t, mode, Retry.Policy{a, base, cap, old}, cert, ca}, pool, j, br} = c
+  Client{Opts{b, h, t, mode, Retry.Policy{a, base, cap, Some{U32.to_nat(ms)}}, cert, ca}, pool, j, br}
 
 # A circuit breaker in front of every request, starting closed.
 def circuit(c: Client, circ: Retry.Circuit) -> Client:
@@ -71,8 +72,13 @@ def breaker.of(c: Client) -> Client & Retry.Breaker:
 
 # Paths to a PEM client chain and its private key, presented to every HTTPS origin.
 def cert(c: Client, chain: String, key: String) -> Client:
-  Client{Opts{b, h, ms, mode, p, old}, pool, j, br} = c
-  Client{Opts{b, h, ms, mode, p, Some{Http.Cert{chain, key}}}, pool, j, br}
+  Client{Opts{b, h, ms, mode, p, old, ca}, pool, j, br} = c
+  Client{Opts{b, h, ms, mode, p, Some{Http.Cert{chain, key}}, ca}, pool, j, br}
+
+# Path to a PEM CA file, trusted in place of the default store. Like the certificate, it follows same-origin redirects only.
+def ca(c: Client, path: String) -> Client:
+  Client{Opts{b, h, ms, mode, p, cert, old}, pool, j, br} = c
+  Client{Opts{b, h, ms, mode, p, cert, path}, pool, j, br}
 
 # Every request stores and sends cookies through jar. Its clock moves to Time.now() before each try.
 def jar(c: Client, jar: Http.Jar) -> Client:
@@ -127,14 +133,14 @@ def once.final(+enc: String, x: Http.Pool & Result<&1, &1, Http.Err, Http.Res> &
     d : Result<&1, &1, Http.Err, Http.Res> <- Http.fetch.final(enc, r)
     return (p, j, d)
 
-# One try: the redirect loop on the pool, with the jar and the certificate, then the body decoded.
-def once(+ms: U32, +mode: Http.Mode, +cert: Maybe<&2, Http.Cert>, +enc: String, p: Http.Pool, j: Maybe<&2, Http.Jar>,
+# One try: the redirect loop on the pool, with the jar, the certificate, and the CA file, then the body decoded.
+def once(+ms: U32, +mode: Http.Mode, +cert: Maybe<&2, Http.Cert>, +ca: String, +enc: String, p: Http.Pool, j: Maybe<&2, Http.Jar>,
     +method: String, +u: Maybe<&2, Url.Abs>, +headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) ->
     IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Res>):
   do IO<Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Res>>:
     now : Maybe<&2, Http.Jar> <- jar.now(j)
     x : Http.Pool & Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, Http.Jar> <-
-      Http.pool.hops(mode, ms, Http.Hops{p, Http.fetch.start(method, headers, body, u, enc), cert, now, ""})
+      Http.pool.hops(mode, ms, Http.Hops{p, Http.fetch.start(method, headers, body, u, enc), cert, now, ca})
     once.final(enc, x)
 
 def hint.ms(m: Maybe<&2, U32>) -> Maybe<&2, Nat>:
@@ -257,9 +263,9 @@ type Call is Data:
 # One attempt that reads a whole response: the redirect loop on the pool, with the jar and the certificate.
 def try.res(o: Opts, call: Call, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, body: Bytes.Bytes) ->
     IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Res>):
-  Opts{base, h, +ms, +mode, p, +cert} = o
+  Opts{base, h, +ms, +mode, p, +cert, +ca} = o
   Call{+enc, +method, +u, +headers} = call
-  once(ms, mode, cert, enc, pool, jar, method, u, headers, body)
+  once(ms, mode, cert, ca, enc, pool, jar, method, u, headers, body)
 
 def try.stream.got(pool: Http.Pool, x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) ->
     Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>:
@@ -270,12 +276,12 @@ def try.stream.got(pool: Http.Pool, x: Maybe<&2, Http.Jar> & Result<&1, &1, Http
 # the jar, and the certificate, then the body decoded by enc.
 def try.stream(o: Opts, call: Call, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, body: Bytes.Bytes) ->
     IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>):
-  Opts{base, h, +ms, mode, p, cert} = o
+  Opts{base, h, +ms, mode, p, cert, ca} = o
   Call{+enc, method, u, headers} = call
   do IO<Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>>:
     now : Maybe<&2, Http.Jar> <- jar.now(jar)
     r : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.stream.hops(mode, ms, Http.StreamHops{Http.stream.start(method, Http.accept.enc(headers, enc), body, u), cert, now})
+      Http.stream.hops(mode, ms, Http.StreamHops{Http.stream.start(method, Http.accept.enc(headers, enc), body, u), cert, now, ca})
     x : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <- Http.stream.init.jar(enc, r)
     return try.stream.got(pool, x)
 
@@ -297,7 +303,7 @@ def attempt.run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, 
     ~try: Opts -> Call -> Http.Pool -> Maybe<&2, Http.Jar> -> Bytes.Bytes -> IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>),
     +o: Opts, +call: Call, +idem: Bool, +n: Nat, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, br: Retry.Breaker,
     b: Retry.Budget, r: Bytes.Bytes & Bytes.Bytes) -> IO(Step<R>):
-  Opts{base, h, ms, mode, +p, cert} = o
+  Opts{base, h, ms, mode, +p, cert, ca} = o
   (body, spare) = r
   do IO<Step<R>>:
     x : Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R> <- try(o, call, pool, jar, spare)
@@ -380,7 +386,7 @@ def attempts(p: Retry.Policy) -> Nat:
 # The budget of one plain request: the policy's attempts, and its deadline from now. The clock is read only for a deadline.
 def budget(c: Client) -> IO(Client & Retry.Budget):
   Client{+o, pool, jar, br} = c
-  Opts{base, h, ms, mode, Retry.Policy{+a, bs, cap, +d}, cert} = o
+  Opts{base, h, ms, mode, Retry.Policy{+a, bs, cap, +d}, cert, ca} = o
   do IO<Client & Retry.Budget>:
     now : Nat <- clock(some(d))
     return (Client{o, pool, jar, br}, Retry.Budget.new(a, now, d))
@@ -391,7 +397,7 @@ def run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err
     c: Client, b: Retry.Budget, +idem: Bool, enc: String, method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Client & Retry.Budget & Result<&1, &1, Err, R>):
   Client{+o, pool, jar, br} = c
-  Opts{+base, +h, ms, mode, +p, cert} = o
+  Opts{+base, +h, ms, mode, +p, cert, ca} = o
   +call = {Call{enc, method, target.abs(target(base, url)), merge(h, headers)} : Call}
   do IO<Client & Retry.Budget & Result<&1, &1, Err, R>>:
     s : Step<R> <- go(~R, ~judge, ~try, ~close, attempts(p), 0n, o, call, idem, Step{pool, jar, br, b, body, None{}, Retry.PlanWait{0n}})

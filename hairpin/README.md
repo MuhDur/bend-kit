@@ -3,13 +3,13 @@
 Hairpin is an HTTP client for Bend 2, built on `bend-kit-http`. One `Client` holds a base URL, default headers, a socket pool, a cookie jar, a client certificate, a redirect mode, a step timeout, a retry policy, and a circuit breaker. Each request uses all of them. The model is undici's `Agent` with ky's instance options.
 
 ```bend
-import bend-kit-hairpin@0.8.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.9.0.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.1.0.0/retry.bend as Retry
-import bend-kit-http@0.35.0.0/http.bend as Http
+import bend-kit-http@0.36.0.0/http.bend as Http
 import bend-kit-time@0.2.0.0/time.bend as Time
 ```
 
-Import `bend-kit-http@0.35.0.0` and `bend-kit-retry@0.1.0.0`. Those are the versions `hairpin.bend` imports, and another version has a different `Http.Res` or `Retry.Budget`. `Time` supplies both `Time.mono.ms()` and the `Instant` values that Http uses.
+Import `bend-kit-http@0.36.0.0` and `bend-kit-retry@0.1.0.0`. Those are the versions `hairpin.bend` imports, and another version has a different `Http.Res` or `Retry.Budget`. `Time` supplies both `Time.mono.ms()` and the `Instant` values that Http uses.
 
 Hairpinning, or NAT loopback, is traffic that goes out and bends back. A request does the same.
 
@@ -49,6 +49,7 @@ The result is `Result<&1, &1, Hairpin.Err, Http.Res>`. `ErrHttp{e}` is the `Http
 | `Hairpin.deadline(c, ms)` | none | No attempt of a request starts `ms` or more after the request starts. A wait that would reach the deadline ends the request instead. |
 | `Hairpin.circuit(c, Retry.Circuit{threshold, window, cooldown, probes})` | none | A circuit breaker in front of every request on this client. See [Circuit breaker](#circuit-breaker). `Hairpin.breaker.of(c)` gives its state back. |
 | `Hairpin.cert(c, chain, key)` | none | Paths to a PEM client chain and key for mutual TLS. The identity follows same-origin redirects only, and pooled sockets are kept per identity. |
+| `Hairpin.ca(c, path)` | `""` | Path to a PEM CA file, trusted for the server handshake in place of the default store. `""` trusts the default store. Like the certificate, the file follows same-origin redirects only. Requests and streams both use it. |
 | `Hairpin.jar(c, jar)` | none | Every hop, redirects and retries included, sends the jar's cookies and stores each `Set-Cookie`. Before each try, the jar's clock moves to `Time.now()`. `Hairpin.jar.of(c)` gives the jar back. |
 
 ## Requests
@@ -111,7 +112,7 @@ The budget, the deadline, the backoff, and the breaker apply as for `request.in`
 
 - `~judge` takes the result of one open. Read the status and headers with `Http.stream.res`, and give the stream back in the result.
 - A refused stream closes when the next attempt is admitted. When no attempt follows, the last stream comes back open, so you can read its error body. Close every stream that comes back.
-- A stream opens its own connection, outside the pool. It follows the client's redirect mode, presents its certificate, and sends and stores cookies through its jar, as `request.as` does. The jar comes back in the client.
+- A stream opens its own connection, outside the pool. It follows the client's redirect mode, presents its certificate, trusts its CA file, and sends and stores cookies through its jar, as `request.as` does. The jar comes back in the client.
 
 ## Circuit breaker
 
@@ -128,3 +129,5 @@ The proofs cover the policy, not the IO loop in `hairpin.bend`. Hairpin calls `R
 ## Checks
 
 `check.bend` runs a local server that accepts exactly one connection per scripted response and then stops listening, so each scenario counts its attempts: a missing attempt times out, and an extra one finds no listener. It checks a redirect that sets a cookie, a 503 retried to a 200, a POST 503 tried once, a 302 in manual mode, 3 attempts for `retry 2`, one attempt for a 404, a deadline that stops after 2 of 6 attempts and one that denies the first, a breaker that opens after 2 failures, denies, and closes after one probe, three nested calls that share a budget of 4: 3 attempts, then 1, then none, a `request.as` judge that retries an idempotent POST through two 404s, an `open.as` stream that opens on the third attempt after two 503s, and an `open.as` stream through a redirect that sends the jar's cookie and the redirect's `Set-Cookie`, with the jar coming back holding both.
+
+`ca-check.sh` makes a private CA and a localhost server signed by it, then runs `ca_check.bend`. A request and a stream, each through a redirect, reach the server with `Hairpin.ca`, and fail with a TLS error without it. Run it by hand: `hairpin/ca-check.sh` for the native lane, `hairpin/ca-check.sh js` for Bun. It needs `openssl` and `python3`.
