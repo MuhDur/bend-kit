@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `http` 0.36.0.0: `open` and `open.how` take the same proxy route as `fetch`: `http_proxy`, `https_proxy`, and `no_proxy` apply, an HTTP proxy gets an absolute-form target, and an HTTPS proxy gets `CONNECT` before TLS. `open.how` and `open.raw.how` take a CA file after `cert`, as `fetch.ca` does; it follows only same-origin hops, and `""` trusts the default store. Breaking: `open.how`, `open.raw.how`, and `open.how.enc` take `ca`; `StreamHops` has a `ca` field; `route.open` takes the h2 offer flag; `pool.origin.proxy` is now `origin.route` plus `pool.origin.route`.
 - Examples and checks: `camber`'s examples, `authz/check.bend`, `gateway`'s app, check, and demo, and `runner/example.bend` import `camber` 0.11.0.0, `webhooks` 0.7.0.0, `hairpin` 0.8.0.0, `http` 0.35.0.0, and `json` 0.6.1.1. The kit now uses one version of each of those.
 - `camber` 0.11.0.0, `jwt` 0.7.0.0, `llm` 0.8.0.0, `oauth2` 0.7.0.0, `sigv4` 0.7.0.0, `webhooks` 0.7.0.0: import `http` 0.35.0.0 and `json` 0.6.1.1, and all but `camber` import `hairpin` 0.8.0.0. Breaking: `Http`, `Hairpin`, and `Json` types come from those versions.
 - CI: `scripts/pins.sh` fails on a `scripts/pins.allow` line that no import uses, and when a `VERSION` rises it lists the siblings still on the old version.
