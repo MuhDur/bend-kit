@@ -21,9 +21,11 @@ extern "C" {
     fn sqlite3_prepare_v2(db: *mut Db, sql: *const c_char, n: c_int, st: *mut *mut Stmt, tail: *mut *const c_char) -> c_int;
     fn sqlite3_bind_int64(st: *mut Stmt, i: c_int, v: i64) -> c_int;
     fn sqlite3_bind_text(st: *mut Stmt, i: c_int, s: *const c_char, n: c_int, d: isize) -> c_int;
+    fn sqlite3_bind_blob(st: *mut Stmt, i: c_int, p: *const c_void, n: c_int, d: isize) -> c_int;
     fn sqlite3_step(st: *mut Stmt) -> c_int;
     fn sqlite3_reset(st: *mut Stmt) -> c_int;
-    fn sqlite3_column_text(st: *mut Stmt, i: c_int) -> *const c_char;
+    fn sqlite3_column_blob(st: *mut Stmt, i: c_int) -> *const c_void;
+    fn sqlite3_column_bytes(st: *mut Stmt, i: c_int) -> c_int;
     fn sqlite3_finalize(st: *mut Stmt) -> c_int;
 }
 
@@ -55,8 +57,17 @@ fn exec(db: *mut Db, sql: &CStr) {
     ok(db, unsafe { sqlite3_exec(db, sql.as_ptr(), null_mut(), null_mut(), null_mut()) }, OK);
 }
 
-fn col(st: *mut Stmt, i: c_int) -> String {
-    unsafe { CStr::from_ptr(sqlite3_column_text(st, i)) }.to_string_lossy().into_owned()
+// A blob column's octets, valid until the statement steps or resets.
+fn col<'a>(st: *mut Stmt, i: c_int) -> &'a [u8] {
+    unsafe {
+        let p = sqlite3_column_blob(st, i) as *const u8;
+        let n = sqlite3_column_bytes(st, i) as usize;
+        if n == 0 { &[] } else { std::slice::from_raw_parts(p, n) }
+    }
+}
+
+fn num(b: &[u8]) -> u32 {
+    std::str::from_utf8(b).unwrap().parse().unwrap()
 }
 
 impl Conn {
@@ -70,14 +81,18 @@ impl Conn {
         ok(self.db, unsafe { sqlite3_bind_text(st, i, c.as_ptr(), -1, TRANSIENT) }, OK);
     }
 
+    fn blob(&self, st: *mut Stmt, i: c_int, b: &[u8]) {
+        ok(self.db, unsafe { sqlite3_bind_blob(st, i, b.as_ptr() as *const c_void, b.len() as c_int, TRANSIENT) }, OK);
+    }
+
     // 1 for a new command, 2 for a duplicate, 0 for a conflict, with the recorded or new total.
     fn handle(&self, id: &str, payload: &str) -> (u32, u32) {
         self.run(self.begin);
         self.text(self.find, 1, id);
         let rc = unsafe { sqlite3_step(self.find) };
         if rc == ROW {
-            let same = col(self.find, 0) == payload;
-            let r: u32 = col(self.find, 2).parse().unwrap();
+            let same = col(self.find, 0) == payload.as_bytes();
+            let r = num(col(self.find, 2));
             ok(self.db, unsafe { sqlite3_reset(self.find) }, OK);
             self.run(self.commit);
             return (if same { 2 } else { 0 }, r);
@@ -85,19 +100,19 @@ impl Conn {
         ok(self.db, rc, DONE);
         ok(self.db, unsafe { sqlite3_reset(self.find) }, OK);
         ok(self.db, unsafe { sqlite3_step(self.read) }, ROW);
-        let total: u32 = col(self.read, 0).parse::<u32>().unwrap().wrapping_add(payload.parse().unwrap());
+        let total: u32 = num(col(self.read, 0)).wrapping_add(payload.parse().unwrap());
         ok(self.db, unsafe { sqlite3_reset(self.read) }, OK);
         let t = total.to_string();
-        self.text(self.save, 1, &t);
+        self.blob(self.save, 1, t.as_bytes());
         self.run(self.save);
         self.text(self.keep, 1, id);
-        self.text(self.keep, 2, payload);
+        self.blob(self.keep, 2, payload.as_bytes());
         ok(self.db, unsafe { sqlite3_bind_int64(self.keep, 3, 1) }, OK);
-        self.text(self.keep, 4, &t);
+        self.blob(self.keep, 4, t.as_bytes());
         ok(self.db, unsafe { sqlite3_bind_int64(self.keep, 5, 200) }, OK);
         self.run(self.keep);
         self.text(self.emit, 1, id);
-        self.text(self.emit, 2, &format!("total={total}"));
+        self.blob(self.emit, 2, format!("total={total}").as_bytes());
         self.run(self.emit);
         self.run(self.commit);
         (1, total)
@@ -128,11 +143,11 @@ fn main() {
     }
     println!("sqlite\t{}", unsafe { CStr::from_ptr(sqlite3_libversion()) }.to_string_lossy());
     exec(db, c"PRAGMA busy_timeout = 10000");
-    exec(db, c"CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state TEXT NOT NULL)");
-    exec(db, c"CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload TEXT NOT NULL, kind INTEGER NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL)");
+    exec(db, c"CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)");
+    exec(db, c"CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)");
     exec(db, c"CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)");
-    exec(db, c"CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect TEXT NOT NULL)");
-    exec(db, c"INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, '0')");
+    exec(db, c"CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)");
+    exec(db, c"INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))");
     let c = Conn {
         db,
         begin: prepare(db, c"BEGIN IMMEDIATE"),
@@ -148,7 +163,7 @@ fn main() {
     c.pass(n, 1);
     let fresh = t0.elapsed();
     ok(db, unsafe { sqlite3_step(c.read) }, ROW);
-    println!("fresh\t{:.3}\t{}", fresh.as_secs_f64() * 1e3, col(c.read, 0));
+    println!("fresh\t{:.3}\t{}", fresh.as_secs_f64() * 1e3, num(col(c.read, 0)));
     ok(db, unsafe { sqlite3_reset(c.read) }, OK);
 
     let t0 = Instant::now();
