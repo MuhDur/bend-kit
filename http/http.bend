@@ -21,7 +21,7 @@ import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
 # Bodies are Bytes. The String parsers below are the spec: one Char per octet.
 # fetch reads until frame() says the response is whole. It returns Result, not Maybe.
 # Build with -o for big bodies: the `bend file.bend` runner overflows on ~30 KB strings; native binaries do not.
-#   import bend-kit-http@0.35.0.0/http.bend as Http
+#   import bend-kit-http@0.36.0.0/http.bend as Http
 
 type Req is Type:
   Req{method: String, path: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes}
@@ -3523,12 +3523,13 @@ def proxy.route.open(+ms: U32, +tls: Bool, +host: String, +port: U32,
       conn.open.all(False{}, ms, host, port, ips, None{}, False{}, "")
     proxy.route.connected(tls, ms, sni, authority, authorization, cert, ca, conn)
 
-def route.open(+ms: U32, route: Route) -> IO(Result<&1, &1, Err, Conn>):
+# offer: send the h2 ALPN offer on a direct TLS connection.
+def route.open(+ms: U32, offer: Bool, route: Route) -> IO(Result<&1, &1, Err, Conn>):
   match route:
     case RouteDirect{tls, +host, port, cert, ca}:
       do IO<Result<&1, &1, Err, Conn>>:
         ips : List<&2, String> <- Dns.resolve.all(host)
-        conn.open.all(tls, ms, host, port, ips, cert, True{}, ca)
+        conn.open.all(tls, ms, host, port, ips, cert, offer, ca)
     case RouteProxy{tls, host, port, sni, authority, authorization, cert, ca}:
       proxy.route.open(ms, tls, host, port, sni, authority, authorization, cert, ca)
 
@@ -3621,7 +3622,7 @@ def pool.fresh.conn(p: Pool, +key: String, +ms: U32, request: Send,
 def pool.fresh(p: Pool, +key: String, +ms: U32, request: Send, route: Route) ->
     IO(Pool & Result<&1, &1, Err, Res>):
   do IO<Pool & Result<&1, &1, Err, Res>>:
-    c : Result<&1, &1, Err, Conn> <- route.open(ms, route)
+    c : Result<&1, &1, Err, Conn> <- route.open(ms, True{}, route)
     pool.fresh.conn(p, key, ms, request, c)
 
 # A reused socket the server already closed fails before any response byte.
@@ -3705,29 +3706,32 @@ def proxy.request(secure: Bool, +scheme: String, method: String,
       Send{method, proxy.absolute(scheme, hf, target), hf,
         proxy.http.headers(headers, authorization), body}
 
-def pool.origin.proxy(p: Pool, +method: String, +ms: U32,
-    headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +hf: String,
-    +scheme: String, +host: String, +port: U32, +target: String,
-    +cert: Maybe<&2, Cert>, +ca: String, proxy: Proxy) ->
-    IO(Pool & Result<&1, &1, Err, Res>):
+# The pool key, the request as sent, and the route to one origin, direct or through a proxy.
+def origin.route(+method: String, headers: Map<&2, List<&2, String>>,
+    body: Bytes.Bytes, +hf: String, +scheme: String, +host: String, +port: U32,
+    +target: String, +cert: Maybe<&2, Cert>, +ca: String, proxy: Proxy) ->
+    String & Send & Route:
   match proxy:
     case ProxyDirect{}:
-      +key = pool.key.trust(pool.key(scheme, host, port), cert, ca)
-      pool.idle(pool.take(p, key), key, ms, pool.idempotent(method),
+      (pool.key.trust(pool.key(scheme, host, port), cert, ca),
         Send{method, target, hf, headers, body},
         RouteDirect{String.eq(scheme, "https"), host, port, cert, ca})
     case ProxyVia{+proxy_host, +proxy_port, +authorization}:
       +secure = String.eq(scheme, "https")
-      +key = pool.key.trust(pool.key(scheme, host, port)
-        ++ "|proxy:" ++ proxy_host ++ ":" ++ U32.show(proxy_port)
-        ++ "|auth:" ++ authorization, cert, ca)
-      pool.idle(pool.take(p, key), key, ms, pool.idempotent(method),
+      (pool.key.trust(pool.key(scheme, host, port)
+          ++ "|proxy:" ++ proxy_host ++ ":" ++ U32.show(proxy_port)
+          ++ "|auth:" ++ authorization, cert, ca),
         proxy.request(secure, scheme, method, target, hf, headers, body, authorization),
         RouteProxy{secure, proxy_host, proxy_port, host,
           Url.host_field.wrap(host, Url.has(host, 58)) ++ ":" ++ U32.show(port),
           authorization, cert, ca})
 
-def pool.origin.choice(p: Pool, method: String, ms: U32,
+def pool.origin.route(p: Pool, +method: String, +ms: U32, r: String & Send & Route) ->
+    IO(Pool & Result<&1, &1, Err, Res>):
+  (+key, request, route) = r
+  pool.idle(pool.take(p, key), key, ms, pool.idempotent(method), request, route)
+
+def pool.origin.choice(p: Pool, +method: String, ms: U32,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, hf: String,
     scheme: String, host: String, port: U32, target: String,
     cert: Maybe<&2, Cert>, +ca: String, choice: Maybe<&2, Proxy>) ->
@@ -3736,8 +3740,8 @@ def pool.origin.choice(p: Pool, method: String, ms: U32,
     case None{}:
       IO.pure(Pool & Result<&1, &1, Err, Res>, (p, Fail{ErrUrl{}}))
     case Some{proxy}:
-      pool.origin.proxy(p, method, ms, headers, body, hf, scheme, host, port,
-        target, cert, ca, proxy)
+      pool.origin.route(p, method, ms, origin.route(method, headers, body, hf,
+        scheme, host, port, target, cert, ca, proxy))
 
 def pool.origin(p: Pool, method: String, ms: U32,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, hf: String,
@@ -4774,31 +4778,56 @@ def stream.conn(r: Result<&1, &1, Err, Conn>, +ms: U32, +head: Bool, wire: Bytes
             Wire.tls.close(s)
             return Fail{ErrBad{}}
 
-# One connection per stream; the request says close. cert: the client identity for this origin.
-def stream.origin(+ms: U32, +head: Bool, wire: Bytes.Bytes, a: Url.Abs, known: Bool, cert: Maybe<&2, Cert>) -> IO(Result<&1, &1, Err, Stream>):
-  Url.Abs{+scheme, +host, +port, target} = a
+# One connection per stream, with no h2 offer; the request says close.
+def stream.route(+ms: U32, r: String & Send & Route) -> IO(Result<&1, &1, Err, Stream>):
+  (key, request, route) = r
+  Send{+method, target, authority, headers, body} = request
+  do IO<Result<&1, &1, Err, Stream>>:
+    c : Result<&1, &1, Err, Conn> <- route.open(ms, False{}, route)
+    stream.conn(c, ms, String.eq(method, "HEAD"),
+      encode_req.on(method, target, authority, headers, body, True{}))
+
+def stream.origin.choice(+method: String, +ms: U32,
+    headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, hf: String,
+    scheme: String, host: String, port: U32, target: String,
+    cert: Maybe<&2, Cert>, +ca: String, choice: Maybe<&2, Proxy>) ->
+    IO(Result<&1, &1, Err, Stream>):
+  match choice:
+    case None{}:
+      IO.pure(Result<&1, &1, Err, Stream>, Fail{ErrUrl{}})
+    case Some{proxy}:
+      stream.route(ms, origin.route(method, headers, body, hf, scheme, host,
+        port, target, cert, ca, proxy))
+
+# cert and ca: the client identity and trusted CA file for this origin.
+def stream.origin(+method: String, +ms: U32, headers: Map<&2, List<&2, String>>,
+    body: Bytes.Bytes, hf: String, a: Url.Abs, known: Bool,
+    cert: Maybe<&2, Cert>, +ca: String, choice: Maybe<&2, Proxy>) ->
+    IO(Result<&1, &1, Err, Stream>):
+  Url.Abs{scheme, host, port, target} = a
   match known:
     case False{}:
       IO.pure(Result<&1, &1, Err, Stream>, Fail{ErrUrl{}})
     case True{}:
-      do IO<Result<&1, &1, Err, Stream>>:
-        ips : List<&2, String> <- Dns.resolve.all(host)
-        c : Result<&1, &1, Err, Conn> <- conn.open.all(String.eq(scheme, "https"), ms, host, port, ips, cert, False{}, "")
-        stream.conn(c, ms, head, wire)
+      stream.origin.choice(method, ms, headers, body, hf, scheme, host, port,
+        target, cert, ca, choice)
 
 # sent is headers plus any jar cookies; the hop keeps headers, so cookies never pile up across hops.
 def stream.one.of(+method: String, +url: Url.Abs, headers: Map<&2, List<&2, String>>, sent: Map<&2, List<&2, String>>,
-    +ms: U32, r: Bytes.Bytes & Bytes.Bytes, cert: Maybe<&2, Cert>) -> IO(Hop & Result<&1, &1, Err, Stream>):
-  Url.Abs{scheme, host, port, +target} = url
+    +ms: U32, r: Bytes.Bytes & Bytes.Bytes, cert: Maybe<&2, Cert>, +ca: String) -> IO(Hop & Result<&1, &1, Err, Stream>):
+  Url.Abs{+scheme, +host, +port, target} = url
   (body, wire) = r
   do IO<Hop & Result<&1, &1, Err, Stream>>:
-    got : Result<&1, &1, Err, Stream> <- stream.origin(ms, String.eq(method, "HEAD"), encode_req.on(method, target, Url.host_field(url), sent, wire, True{}), url, pool.scheme.ok(url), cert)
+    choice : Maybe<&2, Proxy> <- proxy.select(scheme, host, port)
+    got : Result<&1, &1, Err, Stream> <-
+      stream.origin(method, ms, sent, wire, Url.host_field(url), url,
+        pool.scheme.ok(url), cert, ca, choice)
     return (Hop{method, url, headers, body}, got)
 
 # One request on its own connection. The hop comes back for the redirect.
-def stream.one(h: Hop, +ms: U32, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>) -> IO(Hop & Result<&1, &1, Err, Stream>):
+def stream.one(h: Hop, +ms: U32, cert: Maybe<&2, Cert>, +ca: String, jar: Maybe<&2, Jar>) -> IO(Hop & Result<&1, &1, Err, Stream>):
   Hop{+method, +url, +headers, body} = h
-  stream.one.of(method, url, headers, jar.opt.apply(jar, url, headers), ms, Bytes.slice(body, 0, 4294967295), cert)
+  stream.one.of(method, url, headers, jar.opt.apply(jar, url, headers), ms, Bytes.slice(body, 0, 4294967295), cert, ca)
 
 # Go: the next request. Drop: close this stream, then go on. Done: the answer.
 type Sn is Type:
@@ -4835,59 +4864,60 @@ def stream.decide.n(st: Stream, n: Next) -> Sn:
     case NStop{}:
       SnDrop{st, NStop{}}
 
-# The redirect loop's state for a stream: what to do next, the client identity, and the jar.
+# The redirect loop's state for a stream: what to do next, the client identity, the jar, and the CA file.
 type StreamHops is Type:
-  StreamHops{next: Sn, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>}
+  StreamHops{next: Sn, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, ca: String}
 
-# The certificate goes on only to a hop on the same origin, as in pool.next.move.
-def stream.cert(+old: String, cert: Maybe<&2, Cert>, n: Next) -> Next & Maybe<&2, Cert>:
+# The certificate and CA file go on only to a hop on the same origin, as in pool.next.move.
+def stream.trust(+old: String, cert: Maybe<&2, Cert>, +ca: String, n: Next) -> Next & Maybe<&2, Cert> & String:
   match n:
     case NGo{left, h}:
       Hop{method, +url, headers, body} = h
-      (NGo{left, Hop{method, url, headers, body}}, Bool.pick(Maybe<&2, Cert>, String.eq(old, redirect.origin(url)), cert, None{}))
+      +same = String.eq(old, redirect.origin(url))
+      (NGo{left, Hop{method, url, headers, body}}, Bool.pick(Maybe<&2, Cert>, same, cert, None{}), pool.next.ca(same, ca))
     case NDone{r}:
-      (NDone{r}, None{})
+      (NDone{r}, None{}, "")
     case NStop{}:
-      (NStop{}, None{})
+      (NStop{}, None{}, "")
 
-def stream.decide.cert(st: Stream, jar: Maybe<&2, Jar>, nc: Next & Maybe<&2, Cert>) -> StreamHops:
-  (n, cert) = nc
-  StreamHops{stream.decide.n(st, n), cert, jar}
+def stream.decide.trust(st: Stream, jar: Maybe<&2, Jar>, nt: Next & Maybe<&2, Cert> & String) -> StreamHops:
+  (n, cert, ca) = nt
+  StreamHops{stream.decide.n(st, n), cert, jar, ca}
 
-def stream.decide.jar(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, st: Stream, +old: String, hop: Hop,
+def stream.decide.jar(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, +ca: String, st: Stream, +old: String, hop: Hop,
     r: Maybe<&2, Jar> & Result<&1, &1, Err, Res>) -> StreamHops:
   (jar, m) = r
-  stream.decide.cert(st, jar, stream.cert(old, cert, fetch.policy(mode, left, hop, m)))
+  stream.decide.trust(st, jar, stream.trust(old, cert, ca, fetch.policy(mode, left, hop, m)))
 
 # The jar takes the response's Set-Cookie fields first, redirect or not.
-def stream.decide.of(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, hop: Hop, sr: Stream & Res) -> StreamHops:
+def stream.decide.of(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, +ca: String, jar: Maybe<&2, Jar>, hop: Hop, sr: Stream & Res) -> StreamHops:
   Hop{method, +url, headers, body} = hop
   (st, res) = sr
-  stream.decide.jar(mode, left, cert, st, redirect.origin(url), Hop{method, url, headers, body}, jar.opt.store(jar, url, Done{res}))
+  stream.decide.jar(mode, left, cert, ca, st, redirect.origin(url), Hop{method, url, headers, body}, jar.opt.store(jar, url, Done{res}))
 
-def stream.decide(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, x: Hop & Result<&1, &1, Err, Stream>) -> StreamHops:
+def stream.decide(+mode: Mode, left: Nat, cert: Maybe<&2, Cert>, +ca: String, jar: Maybe<&2, Jar>, x: Hop & Result<&1, &1, Err, Stream>) -> StreamHops:
   (hop, r) = x
   match r:
     case Fail{e}:
-      StreamHops{SnDone{Fail{e}}, cert, jar}
+      StreamHops{SnDone{Fail{e}}, cert, jar, ca}
     case Done{st}:
-      stream.decide.of(mode, left, cert, jar, hop, stream.res(st))
+      stream.decide.of(mode, left, cert, ca, jar, hop, stream.res(st))
 
 # mode says what a redirect does, as in pool.hops. The jar comes back beside the stream.
 @unsafe
 def stream.hops(+mode: Mode, +ms: U32, hs: StreamHops) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
-  StreamHops{sn, +cert, +jar} = hs
+  StreamHops{sn, +cert, +jar, +ca} = hs
   match sn:
     case SnDone{r}:
       IO.pure(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>, (jar, r))
     case SnGo{left, hop}:
       do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
-        x : Hop & Result<&1, &1, Err, Stream> <- stream.one(hop, ms, cert, jar)
-        stream.hops(mode, ms, stream.decide(mode, left, cert, jar, x))
+        x : Hop & Result<&1, &1, Err, Stream> <- stream.one(hop, ms, cert, ca, jar)
+        stream.hops(mode, ms, stream.decide(mode, left, cert, ca, jar, x))
     case SnDrop{st, next}:
       do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
         stream.close(st)
-        stream.hops(mode, ms, StreamHops{sn.of(next), cert, jar})
+        stream.hops(mode, ms, StreamHops{sn.of(next), cert, jar, ca})
 
 type Opened is Type:
   Opened{decs: List<&1, Zlib.Decoder>, bad: Bool}
@@ -4997,40 +5027,40 @@ def stream.only(x: Maybe<&2, Jar> & Result<&1, &1, Err, Stream>) -> Result<&1, &
   (jar, r) = x
   r
 
-# A raw stream with every choice of fetch: mode for redirects, cert for the first origin and each
-# same-origin hop, and a jar that gives cookies to every hop and takes them from every response.
-# The jar comes back beside the stream. Body bytes and headers remain as sent.
-def open.raw.how(mode: Mode, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, method: String, url: String,
+# A raw stream with every choice of fetch: mode for redirects, cert and ca for the first origin and each
+# same-origin hop ("" trusts the default store), and a jar that gives cookies to every hop and takes them
+# from every response. The jar comes back beside the stream. Body bytes and headers remain as sent.
+def open.raw.how(mode: Mode, cert: Maybe<&2, Cert>, ca: String, jar: Maybe<&2, Jar>, method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
-  stream.hops(mode, ms, StreamHops{stream.start(method, headers, body, Url.absolute(url)), cert, jar})
+  stream.hops(mode, ms, StreamHops{stream.start(method, headers, body, Url.absolute(url)), cert, jar, ca})
 
 # Open a raw stream. It follows redirects, with no client certificate and no jar.
 def open.raw.with(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Result<&1, &1, Err, Stream>):
   do IO<Result<&1, &1, Err, Stream>>:
-    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <- open.raw.how(ModeFollow{}, None{}, None{}, method, url, headers, body, ms)
+    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <- open.raw.how(ModeFollow{}, None{}, "", None{}, method, url, headers, body, ms)
     return stream.only(x)
 
 def open.raw(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Result<&1, &1, Err, Stream>):
   open.raw.with(method, url, headers, body, 30000)
 
-def open.how.enc(+enc: String, mode: Mode, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, method: String, url: String,
+def open.how.enc(+enc: String, mode: Mode, cert: Maybe<&2, Cert>, ca: String, jar: Maybe<&2, Jar>, method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
   do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
     x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <-
-      stream.hops(mode, ms, StreamHops{stream.start(method, accept.enc(headers, enc), body, Url.absolute(url)), cert, jar})
+      stream.hops(mode, ms, StreamHops{stream.start(method, accept.enc(headers, enc), body, Url.absolute(url)), cert, jar, ca})
     stream.init.jar(enc, x)
 
 # open.raw.how, then each body piece decoded by Content-Encoding (see codings). Unknown codings stay raw.
-def open.how(mode: Mode, cert: Maybe<&2, Cert>, jar: Maybe<&2, Jar>, method: String, url: String,
+def open.how(mode: Mode, cert: Maybe<&2, Cert>, ca: String, jar: Maybe<&2, Jar>, method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Maybe<&2, Jar> & Result<&1, &1, Err, Stream>):
   do IO<Maybe<&2, Jar> & Result<&1, &1, Err, Stream>>:
     enc : String <- codings()
-    open.how.enc(enc, mode, cert, jar, method, url, headers, body, ms)
+    open.how.enc(enc, mode, cert, ca, jar, method, url, headers, body, ms)
 
 # Follow redirects, then decode each body piece by Content-Encoding. No client certificate and no jar.
 def open.with(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, +ms: U32) -> IO(Result<&1, &1, Err, Stream>):
   do IO<Result<&1, &1, Err, Stream>>:
-    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <- open.how(ModeFollow{}, None{}, None{}, method, url, headers, body, ms)
+    x : Maybe<&2, Jar> & Result<&1, &1, Err, Stream> <- open.how(ModeFollow{}, None{}, "", None{}, method, url, headers, body, ms)
     return stream.only(x)
 
 def open(method: String, url: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Result<&1, &1, Err, Stream>):
