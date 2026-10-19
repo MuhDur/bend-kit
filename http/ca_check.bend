@@ -1,5 +1,6 @@
 import Base
 import ./http.bend as Http
+import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 
 def die(+why: String) -> IO(Unit):
   IO.die(Unit, 1, why)
@@ -50,6 +51,43 @@ def pool.ok(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Res>) -> IO(Unit):
     body.ok("pool.fetch.ca", "ok", r)
     Http.pool.close(p)
 
+def stream.piece(+name: String, r: Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> IO(Unit):
+  match r:
+    case Done{Some{b}}:
+      body.eq(name, String.eq(Http.to_string(b), "ok"))
+    case _:
+      die(name ++ " read")
+
+def stream.body(+name: String, r: Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> IO(Unit):
+  (st, got) = r
+  do IO<Unit>:
+    Http.stream.close(st)
+    stream.piece(name, got)
+
+def stream.ok(+name: String, x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Unit):
+  (jar, r) = x
+  match r:
+    case Fail{e}:
+      die(name ++ " failed")
+    case Done{st}:
+      do IO<Unit>:
+        got : Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>> <- Http.stream.read(st)
+        stream.body(name, got)
+
+def stream.fail(+name: String, +want: U32, x: Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Unit):
+  (jar, r) = x
+  match r:
+    case Done{st}:
+      do IO<Unit>:
+        Http.stream.close(st)
+        die(name ++ " succeeded")
+    case Fail{e}:
+      match e:
+        case Http.ErrTls{+code, why}:
+          tls.code(name, code, U32.is_eq(code, want))
+        case other:
+          die(name ++ " was not a TLS error")
+
 def run(+ca: String) -> IO(Unit):
   do IO<Unit>:
     ok : Result<&1, &1, Http.Err, Http.Res> <-
@@ -67,6 +105,12 @@ def run(+ca: String) -> IO(Unit):
     pooled : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
       Http.pool.fetch.ca(Http.pool.new(), "GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), ca)
     pool.ok(pooled)
+    opened : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeFollow{}, None{}, ca, None{}, "GET", "https://localhost:39446/go", Http.empty(), Http.from_string(""), 30000)
+    stream.ok("open.how ca redirect", opened)
+    plain : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.open.how(Http.ModeFollow{}, None{}, "", None{}, "GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), 30000)
+    stream.fail("open.how default store rejects private CA", 100, plain)
 
 def main.args(args: List<&1, String>) -> IO(Unit):
   match args:

@@ -335,10 +335,10 @@ def mtls.run(+one: String, +key1: String, +two: String, +key2: String) -> IO(Uni
       Http.fetch.cert("GET", "https://localhost:39444/back", Http.empty(), Bytes.new(0), one, key1)
     mtls.err(back)
     streamed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeFollow{}, Some{Http.Cert{one, key1}}, None{}, "GET", "https://localhost:39444/who", Http.empty(), Bytes.new(0), 30000)
+      Http.open.how(Http.ModeFollow{}, Some{Http.Cert{one, key1}}, "", None{}, "GET", "https://localhost:39444/who", Http.empty(), Bytes.new(0), 30000)
     j1 : Maybe<&2, Http.Jar> <- opened.got("mTLS stream identity", "client-one", streamed)
     crossed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeFollow{}, Some{Http.Cert{one, key1}}, None{}, "GET", "https://localhost:39444/cross", Http.empty(), Bytes.new(0), 30000)
+      Http.open.how(Http.ModeFollow{}, Some{Http.Cert{one, key1}}, "", None{}, "GET", "https://localhost:39444/cross", Http.empty(), Bytes.new(0), 30000)
     j2 : Maybe<&2, Http.Jar> <- opened.got("mTLS stream: no certificate after a cross-origin redirect", "clean", crossed)
     first : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
       Http.pool.fetch.cert(Http.pool.new(), "GET", "https://localhost:39444/who", Http.empty(), Bytes.new(0), one, key1)
@@ -519,17 +519,17 @@ def local.proxy.http(req: Http.Req) -> IO(Http.Res):
 
 def local.proxy.tunnel.received(l: Listener,
     received: Socket & Result<&1, &1, U32 & String, U32 & Array<U32>>) ->
-    IO(Unit):
+    IO(Listener):
   (s, answer) = received
   match answer:
     case Fail{e}:
-      do IO<Unit>:
+      do IO<Listener>:
         Http.io.close(False{}, s)
         Listener.close(l)
-        IO.die(Unit, 1, "proxy CONNECT read failed")
+        IO.die(Listener, 1, "proxy CONNECT read failed")
     case Done{(len, buf)}:
       +raw = Bytes.to_string(Bytes.Bytes{len, buf})
-      do IO<Unit>:
+      do IO<Listener>:
         local.ok(String.starts_with(raw,
           "CONNECT elsewhere.test:443 HTTP/1.1\r\nHost: elsewhere.test:443\r\n"),
           "proxy CONNECT authority")
@@ -539,18 +539,18 @@ def local.proxy.tunnel.received(l: Listener,
         sent : Socket & Result<&1, &1, U32 & String, Unit> <-
           Http.io.send.bytes(False{}, s, Bytes.from_string("HTTP/1.1 200 Connection Established\r\n\r\n"))
         Http.io.close(False{}, local.gz.sent(sent))
-        Listener.close(l)
+        return l
 
 def local.proxy.tunnel.accept(m: Listener & Result<&1, &1, U32 & String, Socket>) ->
-    IO(Unit):
+    IO(Listener):
   (l, result) = m
   match result:
     case Fail{e}:
-      do IO<Unit>:
+      do IO<Listener>:
         Listener.close(l)
-        IO.die(Unit, 1, "proxy CONNECT accept failed")
+        IO.die(Listener, 1, "proxy CONNECT accept failed")
     case Done{s}:
-      do IO<Unit>:
+      do IO<Listener>:
         got : Socket & Result<&1, &1, U32 & String, U32 & Array<U32>> <-
           Http.io.recv.words(False{}, s, 4096, 2000)
         local.proxy.tunnel.received(l, got)
@@ -559,13 +559,19 @@ def local.proxy.http.accept(inbox: Chan(Admission.Command), m: Listener & Result
     IO(Listener):
   Http.conn(~(req => local.reply(local.proxy.http(req))), ~Completion.ignore, Http.limits(1048576n), inbox, m)
 
+# Two forward requests, then two CONNECT tunnels: pool, then stream, each time.
 def local.proxy.serve(l: Listener) -> IO(Unit):
   do IO<Unit>:
     +inbox : Chan(Admission.Command) <- Admission.open(Admission.Caps{128, 128, 128})
     first : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
     l1 : Listener <- local.proxy.http.accept(inbox, first)
     second : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l1)
-    local.proxy.tunnel.accept(second)
+    l2 : Listener <- local.proxy.http.accept(inbox, second)
+    third : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l2)
+    l3 : Listener <- local.proxy.tunnel.accept(third)
+    fourth : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l3)
+    l4 : Listener <- local.proxy.tunnel.accept(fourth)
+    Listener.close(l4)
     Admission.close(inbox)
 
 def local.proxy.first(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Res>) ->
@@ -580,19 +586,32 @@ def local.proxy.first(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Res>) ->
         local.ok(String.eq(Bytes.to_string(body), "proxy"), "proxy HTTP body")
         return p
 
+def local.proxy.tunneled(e: Http.Err) -> IO(Unit):
+  match e:
+    case Http.ErrTls{code, why}:
+      local.ok(True{}, "proxy CONNECT followed by TLS")
+    case Http.ErrRead{code, why}:
+      local.ok(True{}, "proxy CONNECT followed by TLS")
+    case other:
+      IO.die(Unit, 1, "proxy CONNECT failed before TLS")
+
 def local.proxy.last.result(result: Result<&1, &1, Http.Err, Http.Res>) ->
     IO(Unit):
   match result:
     case Done{res}:
       IO.die(Unit, 1, "proxy CONNECT tunnel unexpectedly served TLS")
     case Fail{e}:
-      match e:
-        case Http.ErrTls{code, why}:
-          local.ok(True{}, "proxy CONNECT followed by TLS")
-        case Http.ErrRead{code, why}:
-          local.ok(True{}, "proxy CONNECT followed by TLS")
-        case other:
-          IO.die(Unit, 1, "proxy CONNECT failed before TLS")
+      local.proxy.tunneled(e)
+
+def local.proxy.stream.last(result: Result<&1, &1, Http.Err, Http.Stream>) ->
+    IO(Unit):
+  match result:
+    case Done{st}:
+      do IO<Unit>:
+        Http.stream.close(st)
+        IO.die(Unit, 1, "proxy CONNECT stream unexpectedly served TLS")
+    case Fail{e}:
+      local.proxy.tunneled(e)
 
 def local.proxy.last(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Res>) ->
     IO(Unit):
@@ -610,11 +629,21 @@ def local.proxy.test() -> IO(Unit):
         Bytes.new(0), "elsewhere.test", "http", "elsewhere.test", 80, "/path",
         None{}, "", Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
     p : Http.Pool <- local.proxy.first(first)
+    streamed : Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.stream.origin.choice("GET", 2000, Http.empty(), Bytes.new(0),
+        "elsewhere.test", "http", "elsewhere.test", 80, "/path", None{}, "",
+        Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
+    j : Maybe<&2, Http.Jar> <- opened.got("proxy stream body", "proxy", (None{}, streamed))
     second : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
       Http.pool.origin.choice(p, "GET", 2000, Http.empty(), Bytes.new(0),
         "elsewhere.test", "https", "elsewhere.test", 443, "/path", None{}, "",
         Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
     local.proxy.last(second)
+    tunneled : Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.stream.origin.choice("GET", 2000, Http.empty(), Bytes.new(0),
+        "elsewhere.test", "https", "elsewhere.test", 443, "/path", None{}, "",
+        Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
+    local.proxy.stream.last(tunneled)
 
 # The fetch.all server answers each path after 100 ms and closes its connection.
 # Sixteen requests therefore make sixteen connections, even with pooled workers.
@@ -873,14 +902,14 @@ def redir.test() -> IO(Unit):
     l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47818))
     IO.spawn(Unit, redir.start(l))
     followed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeFollow{}, None{}, Some{Http.jar.new(now)}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
+      Http.open.how(Http.ModeFollow{}, None{}, "", Some{Http.jar.new(now)}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
     j : Maybe<&2, Http.Jar> <- opened.got("stream jar: Set-Cookie on the first hop is sent on the second", "sid=abc", followed)
     local.ok(String.eq(redir.jar(j), "sid=abc; last=1"), "stream jar comes back with both Set-Cookie fields")
     failed : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeError{}, None{}, None{}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
+      Http.open.how(Http.ModeError{}, None{}, "", None{}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
     redir.error(failed)
     manual : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeManual{}, None{}, None{}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
+      Http.open.how(Http.ModeManual{}, None{}, "", None{}, "GET", "http://127.0.0.1:47818/login", Http.empty(), Bytes.new(0), 2000)
     redir.manual(manual)
 
 def limits.overflow(turn: Http.Turn) -> Bool:
