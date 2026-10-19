@@ -3,9 +3,9 @@
 AWS Signature V4, and an S3 client over `hairpin`.
 
 ```bend
-import bend-kit-sigv4@0.7.0.0/sigv4.bend as Sig
-import bend-kit-hairpin@0.8.0.0/hairpin.bend as Hairpin
-import bend-kit-http@0.35.0.0/http.bend as Http
+import bend-kit-sigv4@0.8.0.0/sigv4.bend as Sig
+import bend-kit-hairpin@0.9.0.0/hairpin.bend as Hairpin
+import bend-kit-http@0.36.0.0/http.bend as Http
 ```
 
 `sigv4.bend` imports that `http`, `bend-kit-crypto@0.2.2.1`, `bend-kit-time@0.2.0.0`, and `bend-kit-collections@0.1.3.0`, whose `Order.string` sorts the canonical query. HMAC-SHA256 needs OpenSSL 3 (`BEND_LIBCRYPTO` on the crypto package).
