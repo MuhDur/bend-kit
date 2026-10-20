@@ -148,7 +148,7 @@ def codec() -> IO(Unit):
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Cancel{8n}), 0, 16)))), "none", "a short Cancel is not an op")
 
 # ---- jobs: "log|kind:name". work notes the job in log, runs it, then notes "end" and the job, and answers by kind.
-# A slow job sleeps 1 s before it ends.
+# A slow job ("slow:" or "slowfail:") sleeps 1 s before it ends. A "fail:" or "slowfail:" job fails.
 def note.close(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
   (f, x) = r
   File.close(f)
@@ -160,14 +160,14 @@ def note(+log: String, +spec: String) -> IO(Unit):
     note.close(r)
 
 def outcome(+spec: String) -> Retry.Outcome:
-  Bool.pick(Retry.Outcome, String.starts_with(spec, "fail:"), Retry.Transient{Some{0n}}, Retry.Settled{})
+  Bool.pick(Retry.Outcome, Bool.or(String.starts_with(spec, "fail:"), String.starts_with(spec, "slowfail:")), Retry.Transient{Some{0n}}, Retry.Settled{})
 
 def work.go(xs: List<&2, String>) -> IO(Retry.Outcome):
   match xs:
     case Con{+log, Con{+spec, Nil{}}}:
       do IO<Retry.Outcome>:
         note(log, spec)
-        IO.sleep(Bool.pick(U32, String.starts_with(spec, "slow:"), 1000, 0))
+        IO.sleep(Bool.pick(U32, String.starts_with(spec, "slow"), 1000, 0))
         note(log, "end " ++ spec)
         return outcome(spec)
     case _:
@@ -543,12 +543,78 @@ def overlap(+dir: String) -> IO(Unit):
     same(Nat.show(peak(ys, 0n, 0n)), "2", "no more attempts run at once than the capacity")
     same(last(ys, ""), "end slow:s", "the fast jobs finish while the slow job runs")
 
+def answered(+log: String, y: R.Out(Nat)) -> IO(Unit):
+  match y:
+    case Done{i}:
+      note(log, "answered " ++ Nat.show(i))
+    case Fail{(c, m)}:
+      note(log, "refused " ++ m)
+
+def cancelled(+log: String, y: R.Out(Unit)) -> IO(Unit):
+  match y:
+    case Done{u}:
+      note(log, "cancelled")
+    case Fail{(c, m)}:
+      note(log, "refused " ++ m)
+
+# Another fiber enqueues job n 200 ms into an attempt that runs 1 s.
+def adder(ib: Chan(R.Msg<String>), +log: String) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(200)
+    y : R.Out(Nat) <- R.ask.enqueue(String, ib, 0n, log ++ "|ok:n")
+    answered(log, y)
+
+# Another fiber cancels ticket 0 200 ms into its attempt.
+def canceller(ib: Chan(R.Msg<String>), +log: String) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(200)
+    y : R.Out(Unit) <- R.ask.cancel(String, ib, 0n)
+    cancelled(log, y)
+
+# Starts act with the runner's inbox on its own fiber, then drains, then waits for act.
+def beside(x: R.Runner<String> & Chan(R.Msg<String>), act: Chan(R.Msg<String>) -> IO(Unit)) -> IO(R.Runner<String>):
+  (r, ib) = x
+  do IO<R.Runner<String>>:
+    ch : Chan(Unit) <- IO.fork(Unit, act(ib))
+    r2 : R.Runner<String> <- drain(r)
+    m : Maybe<&1, Unit> <- IO.within(Unit, 3000, IO.join(Unit, ch))
+    return r2
+
+# Capacity 2: while a slow job runs, another fiber enqueues a job. The enqueue answers before the slow job ends, and the new job runs in the same drain.
+def asks(+dir: String) -> IO(Unit):
+  +path = dir ++ "/asks.journal"
+  +log = dir ++ "/asks.log"
+  do IO<Unit>:
+    r0 : R.Runner<String> <- opened(path, 100n)
+    r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|slow:s")
+    r2 : R.Runner<String> <- beside(R.inbox(String, r1), ib => adder(ib, log))
+    closed("next=2 pending=0 running=0 tries=0 fails=0 dead=0", "a job that another fiber enqueues runs in the same drain", view(r2))
+    +ys : List<&2, String> <- read(log)
+    same(counts(ys, ["answered 1", "ok:n", "end ok:n"]), "answered 1=1 ok:n=1 end ok:n=1 ", "the enqueue answers its id, and the new job runs once")
+    same(last(ys, ""), "end slow:s", "the enqueue answers, and the new job ends, before the slow job ends")
+
+# Another fiber cancels a failing job while its attempt runs. Its outcome does not requeue it, and the cancel survives a reopen.
+def asks.cancel(+dir: String) -> IO(Unit):
+  +path = dir ++ "/cancel.journal"
+  +log = dir ++ "/cancel.log"
+  do IO<Unit>:
+    r0 : R.Runner<String> <- opened(path, 100n)
+    r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|slowfail:c")
+    r2 : R.Runner<String> <- beside(R.inbox(String, r1), ib => canceller(ib, log))
+    closed("next=1 pending=0 running=0 tries=0 fails=0 dead=0", "a ticket cancelled while it runs stays cancelled after its attempt ends", view(r2))
+    +ys : List<&2, String> <- read(log)
+    same(counts(ys, ["slowfail:c", "cancelled"]), "slowfail:c=1 cancelled=1 ", "the cancel answers, and the failed attempt does not run again")
+    r3 : R.Runner<String> <- opened(path, 100n)
+    closed("next=1 pending=0 running=0 tries=0 fails=0 dead=0", "reopen replays the cancel", view(r3))
+
 def all(+dir: String) -> IO(Unit):
   do IO<Unit>:
     durable(dir)
     crash(dir)
     breaker(dir)
     overlap(dir)
+    asks(dir)
+    asks.cancel(dir)
     compaction(dir)
     compaction.auto(dir)
     crash.snapshot(dir)
