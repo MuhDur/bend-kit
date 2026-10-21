@@ -5,7 +5,7 @@ import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-url@0.4.1.0/url.bend as Url
 import bend-kit-json@0.6.1.1/json.bend as Json
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-retry@0.1.0.0/retry.bend as Retry
+import bend-kit-retry@0.2.0.0/retry.bend as Retry
 
 # base: "" for none. headers: lowercase names. ms: the step timeout. policy: attempts, backoff, and deadline of each request.
 # ca: a PEM CA file to trust; "" trusts the default store.
@@ -151,6 +151,7 @@ def hint.ms(m: Maybe<&2, U32>) -> Maybe<&2, Nat>:
       Some{U32.to_nat(ms)}
 
 # m is Http.retry.judge's verdict for an idempotent request: Some{Retry-After} when another try may help.
+# None is Settled, so the breaker counts any other response or error as a success.
 # A non-idempotent request with that verdict is Unsafe: the breaker counts it, but it never repeats.
 def outcome(+idem: Bool, m: Maybe<&2, String>, now: Time.Instant) -> Retry.Outcome:
   match m:
@@ -194,6 +195,8 @@ def transient(o: Retry.Outcome) -> Bool:
     case Retry.Settled{}:
       False{}
     case Retry.Unsafe{}:
+      False{}
+    case Retry.Failed{}:
       False{}
 
 def some(m: Maybe<&2, Nat>) -> Bool:
