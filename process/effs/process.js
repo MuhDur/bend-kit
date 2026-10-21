@@ -297,7 +297,7 @@ function read_stdin(max, k) {
 
 function exit_raw(code) {
   process.exit(Number(code));
-  return { $: "Unit" };
+  return { $: CID(Unit) };
 }
 
 function cwd() {
@@ -314,7 +314,7 @@ function chdir(path) {
   }
   try {
     process.chdir(path);
-    return io_done({ $: "Unit" });
+    return io_done({ $: CID(Unit) });
   } catch (e) {
     const code = e.errno ?? (e.code === "ENOENT" ? 2 : e.code === "EACCES" ? 13 : e.code === "ERR_INVALID_ARG_TYPE" ? 22 : 5);
     return io_fail(Math.abs(code));
@@ -376,15 +376,13 @@ function signal_poll() {
   return process_signal_native() >>> 0;
 }
 
-// Standalone JS builds use the older effect registry; bundled builds collect
-// functions by name. Register explicitly only when that registry is present.
-if (typeof io_eff === "function") {
-  for (const [name, fn] of Object.entries({
-    run_raw, spawn, wait, read_stdin, exit_raw, cwd, chdir, hostname, pid, signal_poll,
-  })) {
-    const effect = name === "run_raw" ? "run.raw"
-      : name === "exit_raw" ? "exit.raw"
-      : name === "signal_poll" ? "signal.poll" : name;
-    io_eff("process." + effect, fn);
-  }
-}
+io_eff(CID(run.raw), run_raw);
+io_eff(CID(spawn), spawn);
+io_eff(CID(wait), wait);
+io_eff(CID(read_stdin), read_stdin);
+io_eff(CID(exit.raw), exit_raw);
+io_eff(CID(cwd), cwd);
+io_eff(CID(chdir), chdir);
+io_eff(CID(hostname), hostname);
+io_eff(CID(pid), pid);
+io_eff(CID(signal.poll), signal_poll);

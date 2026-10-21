@@ -10,7 +10,7 @@ Licensed under Apache-2.0. See [LICENSE](LICENSE). [Contributing](CONTRIBUTING.m
 
 ## Install
 
-You need [Bend 2.0.37 or newer](https://bend-lang.com/install.sh) and [Bun 1.4.2](https://bun.sh/docs/installation). macOS or Linux, including WSL. Windows is not supported.
+You need [Bend 2.0.38 or newer](https://bend-lang.com/install.sh) and [Bun 1.4.2](https://bun.sh/docs/installation). macOS or Linux, including WSL. Windows is not supported.
 
 ```bend
 import Base
@@ -128,7 +128,7 @@ Each package README has the import, one example, and the limits that change the 
 |---|---|---|
 | [`files`](files) | `bend-kit-files@0.1.1.1/files.bend` | POSIX paths, directories, and packed file IO. |
 | [`stream`](stream) | `bend-kit-stream@0.1.0.1/stream.bend` | Bounded copies between files and TCP/TLS sockets. |
-| [`process`](process) | `bend-kit-process@0.4.0.0/process.bend` | Commands with a child working directory and byte-exact stdin, stdout, and stderr. |
+| [`process`](process) | `bend-kit-process@0.4.0.1/process.bend` | Commands with a child working directory and byte-exact stdin, stdout, and stderr. |
 | [`collections`](collections) | `bend-kit-collections@0.1.3.0/omap.bend` | Ordered maps, a hash map, a vector, a deque, a heap, and comparators. Import the file you need. |
 | [`time`](time) | `bend-kit-time@0.1.3.0/time.bend` | Clocks, dates, RFC 3339, HTTP-date, and TZif zones. |
 | [`random`](random) | `bend-kit-random@0.1.0.1/random.bend` | Seeded xoshiro128**. Not for cryptography. |
