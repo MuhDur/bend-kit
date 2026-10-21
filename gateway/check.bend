@@ -6,7 +6,7 @@ import ./upstream.bend as Up
 import bend-kit-camber@0.12.0.0/camber.bend as C
 import bend-kit-http@0.36.0.0/http.bend as H
 import bend-kit-cache@0.2.0.0/cache.bend as Cache
-import bend-kit-hairpin@0.9.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.10.0.0/hairpin.bend as Hairpin
 
 def PORT() -> U32:
   18461

@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `jwt` 0.9.0.0, `llm` 0.10.0.0, `oauth2` 0.9.0.0, `sigv4` 0.9.0.0, `webhooks` 0.9.0.0: import `hairpin` 0.10.0.0, and `llm`, `sigv4`, and `webhooks` import `retry` 0.2.0.0. `gateway`'s app, check, and demo import them too. Breaking: `Hairpin` and `Retry` types come from those versions.
 - `runner` 0.8.0.0: imports `retry` 0.2.0.0. A `Retry.Failed` attempt gives `Abandon{id, WhyFailed}`, so its ticket is dead after one attempt, with its payload; the codec writes why 3. `failed_abandon` proves it. The webhook example answers `Failed` for a non-2xx status that will not change. Breaking: `Why` has `WhyFailed`, and outcomes are `retry` 0.2.0.0 types.
 - `hairpin` 0.10.0.0: imports `retry` 0.2.0.0. It never answers `Retry.Failed`. Breaking: `Retry` types come from that version.
 - `retry` 0.2.0.0: `Failed` is a failure that another try would repeat. `plan` stops on it, and `failed` counts it for the breaker. Breaking: `Settled` now means a success only, and a match on `Outcome` needs a `Failed` case.

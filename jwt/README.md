@@ -3,8 +3,8 @@
 Compact JWS tokens. HS256, HS384, HS512, RS256, and ES256. Claim checks, and JWKS lookup over `hairpin`.
 
 ```bend
-import bend-kit-jwt@0.8.0.0/jwt.bend as Jwt
-import bend-kit-hairpin@0.9.0.0/hairpin.bend as Hairpin
+import bend-kit-jwt@0.9.0.0/jwt.bend as Jwt
+import bend-kit-hairpin@0.10.0.0/hairpin.bend as Hairpin
 import bend-kit-http@0.36.0.0/http.bend as Http
 ```
 
