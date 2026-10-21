@@ -163,6 +163,18 @@ law plan_unsafe_stops:
   for r: Nat
   {Retry.plan(Retry.Unsafe{}, p, b, n, now, r) == Retry.PlanStop{} : Retry.Plan}
 
+law plan_failed_stops:
+  for p: Retry.Policy
+  for b: Retry.Budget
+  for n: Nat
+  for now: Nat
+  for r: Nat
+  {Retry.plan(Retry.Failed{}, p, b, n, now, r) == Retry.PlanStop{} : Retry.Plan}
+
+# A failure that another try would repeat still counts against the breaker.
+law failed_counts:
+  {Retry.failed(Retry.Failed{}) == True{} : Bool}
+
 law plan_spent_stops:
   for after: Maybe<&2, Nat>
   for p: Retry.Policy
