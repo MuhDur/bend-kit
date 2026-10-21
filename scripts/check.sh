@@ -12,6 +12,7 @@ verdict() {
   printf '%s\n' "$out" | awk -v bad="$2" '
     NR == 1 { ok = $0 == "SOME PROOFS FAIL"; next }
     NR == 2 { ok = ok && /^Error: [0-9]+ defs? rel(y|ies) on unsafe or foreign code:$/; next }
+    /^bend [0-9.]+ is available: run bend update$/ { next }
     !/^- / || (bad != "" && $2 ~ bad) { ok = 0 }
     END { exit !ok }'
 }
