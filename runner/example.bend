@@ -4,7 +4,7 @@ import Base
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-webhooks@0.8.0.0/webhooks.bend as W
 import bend-kit-hairpin@0.9.0.0/hairpin.bend as Hairpin
-import bend-kit-retry@0.1.0.0/retry.bend as Retry
+import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import bend-kit-http@0.36.0.0/http.bend as Http
 import bend-kit-http@0.36.0.0/admission.bend as Admission
 import bend-kit-http@0.36.0.0/completion.bend as Completion
@@ -42,9 +42,10 @@ def secret() -> String:
   "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 
 # A 2xx is delivered. A timeout, a refused connect, 408, 429, or a 5xx may clear on a later attempt.
-# Any other answer will not change, so the runner stops.
+# Any other answer will not change, so the runner keeps the hook dead.
 def judge.status(+s: U32) -> Retry.Outcome:
-  Bool.pick(Retry.Outcome, Bool.or(Bool.or(U32.is_eq(s, 408), U32.is_eq(s, 429)), U32.is_ge(s, 500)), Retry.Transient{None{}}, Retry.Settled{})
+  Bool.pick(Retry.Outcome, Bool.and(U32.is_ge(s, 200), U32.is_lt(s, 300)), Retry.Settled{},
+  Bool.pick(Retry.Outcome, Bool.or(Bool.or(U32.is_eq(s, 408), U32.is_eq(s, 429)), U32.is_ge(s, 500)), Retry.Transient{None{}}, Retry.Failed{}))
 
 def judge(r: Result<&1, &1, W.SendErr, Http.Res>) -> Retry.Outcome:
   match r:
@@ -53,7 +54,7 @@ def judge(r: Result<&1, &1, W.SendErr, Http.Res>) -> Retry.Outcome:
     case Fail{W.SendNet{e}}:
       Retry.Transient{None{}}
     case Fail{W.SendSign{e}}:
-      Retry.Settled{}
+      Retry.Failed{}
 
 def sent(x: Hairpin.Client & Result<&1, &1, W.SendErr, Http.Res>) -> IO(Retry.Outcome):
   (c, r) = x

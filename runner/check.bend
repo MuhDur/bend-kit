@@ -1,7 +1,7 @@
 import Base
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-journal@0.2.0.0/journal.bend as J
-import bend-kit-retry@0.1.0.0/retry.bend as Retry
+import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import bend-kit-scheduler@0.3.0.0/queue.bend as Q
 import bend-kit-files@0.2.0.0/files.bend as Files
 import bend-kit-collections@0.1.3.0/heap.bend as H
@@ -42,6 +42,8 @@ def show.why(w: R.Why) -> String:
       "late"
     case R.WhyUnsafe{}:
       "unsafe"
+    case R.WhyFailed{}:
+      "failed"
 
 def show(m: Maybe<&2, R.Op<String>>) -> String:
   match m:
@@ -141,14 +143,16 @@ def codec() -> IO(Unit):
     same(rt(R.Abandon{11n, R.WhySpent{}}), "abandon 11 spent", "an Abandon keeps its id and a spent why")
     same(rt(R.Abandon{11n, R.WhyLate{}}), "abandon 11 late", "an Abandon keeps a late why")
     same(rt(R.Abandon{11n, R.WhyUnsafe{}}), "abandon 11 unsafe", "an Abandon keeps an unsafe why")
+    same(rt(R.Abandon{11n, R.WhyFailed{}}), "abandon 11 failed", "an Abandon keeps a failed why")
     same(rt(R.Revive{12n, t}), "revive 12 1700000000123", "a Revive keeps its id and deadline")
-    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}}), 12, 3))), "none", "an Abandon with an unknown why is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}}), 12, 4))), "none", "an Abandon with an unknown why is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.from_string("abc"))), "none", "a record shorter than a head is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 10))), "none", "an unknown tag is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Cancel{8n}), 0, 16)))), "none", "a short Cancel is not an op")
 
 # ---- jobs: "log|kind:name". work notes the job in log, runs it, then notes "end" and the job, and answers by kind.
-# A slow job ("slow:" or "slowfail:") sleeps 1 s before it ends. A "fail:" or "slowfail:" job fails.
+# A slow job ("slow:" or "slowfail:") sleeps 1 s before it ends. A "fail:" or "slowfail:" job fails, and another try can help.
+# A "dead:" job fails, and another try would repeat the failure.
 def note.close(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
   (f, x) = r
   File.close(f)
@@ -160,7 +164,8 @@ def note(+log: String, +spec: String) -> IO(Unit):
     note.close(r)
 
 def outcome(+spec: String) -> Retry.Outcome:
-  Bool.pick(Retry.Outcome, Bool.or(String.starts_with(spec, "fail:"), String.starts_with(spec, "slowfail:")), Retry.Transient{Some{0n}}, Retry.Settled{})
+  Bool.pick(Retry.Outcome, String.starts_with(spec, "dead:"), Retry.Failed{},
+  Bool.pick(Retry.Outcome, Bool.or(String.starts_with(spec, "fail:"), String.starts_with(spec, "slowfail:")), Retry.Transient{Some{0n}}, Retry.Settled{}))
 
 def work.go(xs: List<&2, String>) -> IO(Retry.Outcome):
   match xs:
@@ -296,6 +301,19 @@ def durable(+dir: String) -> IO(Unit):
     z : R.Ran(String) <- R.cancel(~String, ~penc, r11, 1n)
     r12 : R.Runner<String> <- ran(z)
     closed("next=3 pending=0 running=0 tries=0 fails=0 dead=0", "cancel drops a dead job", view(r12))
+
+# A job whose failure another try would repeat is dead after one attempt, with its payload.
+def failed(+dir: String) -> IO(Unit):
+  +path = dir ++ "/failed.journal"
+  +log = dir ++ "/failed.log"
+  do IO<Unit>:
+    r0 : R.Runner<String> <- opened(path, 100n)
+    r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|dead:f")
+    r2 : R.Runner<String> <- drain(r1)
+    r3 : R.Runner<String> <- held(view(r2), "next=1 pending=0 running=0 tries=0 fails=0 dead=1", "a failure that would repeat makes the job dead")
+    closed("0:failed:" ++ log ++ "|dead:f ", "the dead job keeps its payload and a failed why", dead.of(R.state(String, r3)))
+    xs : List<&2, String> <- read(log)
+    same(counts(xs, ["dead:f"]), "dead:f=1 ", "a failure that would repeat runs one attempt")
 
 def status(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> U32:
   match r:
@@ -610,6 +628,7 @@ def asks.cancel(+dir: String) -> IO(Unit):
 def all(+dir: String) -> IO(Unit):
   do IO<Unit>:
     durable(dir)
+    failed(dir)
     crash(dir)
     breaker(dir)
     overlap(dir)

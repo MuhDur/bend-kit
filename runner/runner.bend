@@ -4,17 +4,19 @@ import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-journal@0.2.0.0/journal.bend as J
 import bend-kit-scheduler@0.3.0.0/queue.bend as Q
 import bend-kit-resources@0.1.0.0/resources.bend as Res
-import bend-kit-retry@0.1.0.0/retry.bend as Retry
+import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-collections@0.1.3.0/heap.bend as H
 import bend-kit-collections@0.1.3.0/omap.bend as O
 import bend-kit-files@0.2.0.0/files.bend as Files
 
-# Why retry gave up on a ticket: its budget was spent, its deadline passed, or its failure must not repeat.
+# Why retry gave up on a ticket: its budget was spent, its deadline passed, its failure must not repeat,
+# or another try would repeat its failure.
 type Why is Data:
   WhySpent{}
   WhyLate{}
   WhyUnsafe{}
+  WhyFailed{}
 
 # A ticket that retry gave up on, with its payload. It stays until Revive or Cancel takes it.
 type Dead<-A: Data> is Data:
@@ -283,6 +285,8 @@ def stopped(-A: Data, o: Retry.Outcome, b: Retry.Budget, +id: Nat) -> Op<A>:
   match o:
     case Retry.Settled{}:
       Complete{id}
+    case Retry.Failed{}:
+      Abandon{id, WhyFailed{}}
     case Retry.Unsafe{}:
       Abandon{id, WhyUnsafe{}}
     case Retry.Transient{w}:
@@ -332,6 +336,8 @@ def why.code(w: Why) -> Nat:
       1n
     case WhyUnsafe{}:
       2n
+    case WhyFailed{}:
+      3n
 
 def W() -> Nat:
   Nat.mul(65536n, 65536n)
@@ -389,7 +395,8 @@ def get.u64(b: Bytes.Bytes, +at: U32) -> Bytes.Bytes & Nat:
 def decode.abandon(-A: Data, +a: Nat, +c: Nat) -> Maybe<&2, Op<A>>:
   Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 0n), Some{Abandon{a, WhySpent{}}},
   Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 1n), Some{Abandon{a, WhyLate{}}},
-  Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 2n), Some{Abandon{a, WhyUnsafe{}}}, None{})))
+  Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 2n), Some{Abandon{a, WhyUnsafe{}}},
+  Bool.pick(Maybe<&2, Op<A>>, Nat.is_eq(c, 3n), Some{Abandon{a, WhyFailed{}}}, None{}))))
 
 def decode.small(-A: Data, ok: Bool, +tag: U32, +a: Nat, +c: Nat) -> Maybe<&2, Op<A>>:
   match ok:
@@ -643,7 +650,8 @@ def rd.tries(+fuel: Nat, node: Bool) -> Dec(O.OMap<Nat, Try>):
 def rd.why(+c: U32) -> Dec(Why):
   Bool.pick(Dec(Why), U32.is_eq(c, 0), Dec.pure(Why, WhySpent{}),
   Bool.pick(Dec(Why), U32.is_eq(c, 1), Dec.pure(Why, WhyLate{}),
-  Bool.pick(Dec(Why), U32.is_eq(c, 2), Dec.pure(Why, WhyUnsafe{}), Dec.fail(Why))))
+  Bool.pick(Dec(Why), U32.is_eq(c, 2), Dec.pure(Why, WhyUnsafe{}),
+  Bool.pick(Dec(Why), U32.is_eq(c, 3), Dec.pure(Why, WhyFailed{}), Dec.fail(Why)))))
 
 def rd.dead(~A: Data, ~pdec: Bytes.Bytes -> Maybe<&2, A>, +fuel: Nat, more: Bool) -> Dec(List<&2, Dead<A>>):
   match fuel more:

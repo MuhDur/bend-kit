@@ -3,7 +3,7 @@ import bend-mathlib@0.7.2.0/nat.bend as MNat
 import bend-kit-scheduler@0.3.0.0/queue.bend as Q
 import bend-kit-collections@0.1.3.0/heap.bend as H
 import bend-kit-resources@0.1.0.0/resources.bend as Res
-import bend-kit-retry@0.1.0.0/retry.bend as Retry
+import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import ./runner.bend as R
 
 # ---- replay
@@ -296,6 +296,17 @@ law unsafe_abandon:
   for +now: Nat
   for +r: Nat
   {R.after(A, Retry.Unsafe{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyUnsafe{}} : R.Op<A>}
+
+# Another try would repeat the failure, so its ticket is dead after this attempt.
+law failed_abandon:
+  for -A: Data
+  for p: Retry.Policy
+  for b: Retry.Budget
+  for +id: Nat
+  for +n: Nat
+  for +now: Nat
+  for +r: Nat
+  {R.after(A, Retry.Failed{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyFailed{}} : R.Op<A>}
 
 # When retry.plan stops a transient failure, its ticket is dead: spent when no attempt is left, else late.
 law transient_abandon:
