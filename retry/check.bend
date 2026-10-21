@@ -40,6 +40,8 @@ def main() -> IO(Unit):
     require(Nat.is_eq(Retry.jitter(4000n, 7n), 2007n), "equal jitter starts at half the delay")
     require(Nat.is_eq(waits(Retry.plan(Retry.Transient{Some{1200n}}, policy(), Retry.Budget{2n, Some{10000n}}, 0n, 0n, 0n)), 1200n), "a server wait wins over backoff")
     require(Nat.is_eq(waits(Retry.plan(Retry.Transient{Some{1200n}}, policy(), Retry.Budget{2n, Some{10000n}}, 0n, 9000n, 0n)), 0n), "a wait that reaches the deadline stops")
+    require(Nat.is_eq(waits(Retry.plan(Retry.Failed{}, policy(), Retry.Budget{2n, None{}}, 0n, 0n, 0n)), 0n), "a failure that would repeat stops")
+    require(Bool.not(gate(Retry.admit(Retry.Breaker.done(Retry.Breaker.done(Retry.Breaker.new(circ()), 100n, Retry.failed(Retry.Failed{})), 200n, Retry.failed(Retry.Failed{})), Retry.Budget.new(1n, 0n, None{}), 300n))), "failures that would repeat open the circuit")
     require(gate(Retry.admit(Retry.BreakerOff{}, Retry.Budget.new(1n, 0n, None{}), 0n)), "a fresh budget admits")
     require(Bool.not(gate(Retry.admit(tripped(), Retry.Budget.new(1n, 0n, None{}), 300n))), "an open circuit denies")
     require(gate(Retry.admit(tripped(), Retry.Budget.new(1n, 0n, None{}), 5200n)), "the cooldown ends with a probe")
