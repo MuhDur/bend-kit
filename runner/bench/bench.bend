@@ -73,7 +73,7 @@ def sum(h: H.Heap<Q.Ticket<U32>>, +acc: Nat) -> Nat:
 
 def shown(+op: String, m: Maybe<&2, R.State<U32>>, t0: Time.Duration) -> IO(Unit):
   match m:
-    case Some{R.State{Q.State{next, +h, run}, ts, ds}}:
+    case Some{R.State{Q.State{next, +h, run}, ts, ds, bs}}:
       do IO<Unit>:
         IO.print("chk\t" ++ op ++ "\t" ++ Nat.show(Nat.mod(sum(h, 0n), Nat.mul(65536n, 65536n))))
         IO.print("n\t" ++ op ++ "\t" ++ Nat.show(H.Heap.size(Q.Ticket<U32>, h)) ++ "/" ++ Nat.show(next))
