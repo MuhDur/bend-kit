@@ -2,7 +2,7 @@
 import Base
 import ./admission.bend as Admission
 import ./completion.bend as Completion
-import bend-kit-wire@0.4.6.1/wire.bend as Wire
+import bend-kit-wire@0.4.6.2/wire.bend as Wire
 import bend-kit-http2@0.3.0.0/http2.bend as H2
 import bend-kit-http2@0.3.0.0/hpack.bend as Hpack
 import bend-kit-bytes@0.3.2.0/bytes.bend as HBytes
@@ -13,7 +13,7 @@ import bend-kit-url@0.4.1.0/url.bend as Url
 import bend-kit-encoding@0.4.0.0/encoding.bend as Enc
 import bend-kit-json@0.6.1.1/json.bend as Json
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-dns@0.6.0.2/dns.bend as Dns
+import bend-kit-dns@0.6.0.3/dns.bend as Dns
 import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
 
 # HTTP/1.1 codec and client (RFC 9112) for http:// and https:// (OpenSSL 3 at run time).
@@ -21,7 +21,7 @@ import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
 # Bodies are Bytes. The String parsers below are the spec: one Char per octet.
 # fetch reads until frame() says the response is whole. It returns Result, not Maybe.
 # Build with -o for big bodies: the `bend file.bend` runner overflows on ~30 KB strings; native binaries do not.
-#   import bend-kit-http@0.36.0.0/http.bend as Http
+#   import bend-kit-http@0.36.0.1/http.bend as Http
 
 type Req is Type:
   Req{method: String, path: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes}
