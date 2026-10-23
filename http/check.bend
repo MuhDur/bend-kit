@@ -638,6 +638,12 @@ def local.proxy.upload(r: Result<&1, &1, Http.Err, Http.Up>) ->
         w : Http.Up & Result<&2, &2, Http.Err, Unit> <- Http.upload.write(up, Bytes.from_string("hi"))
         local.proxy.upload.wrote(w)
 
+def local.stream.unpool(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Result<&1, &1, Http.Err, Http.Stream>):
+  (p, r) = pr
+  do IO<Result<&1, &1, Http.Err, Http.Stream>>:
+    Http.pool.close(p)
+    return r
+
 def local.proxy.test() -> IO(Unit):
   do IO<Unit>:
     l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47815))
@@ -647,10 +653,11 @@ def local.proxy.test() -> IO(Unit):
         Bytes.new(0), "elsewhere.test", "http", "elsewhere.test", 80, "/path",
         None{}, "", Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
     p : Http.Pool <- local.proxy.first(first)
-    streamed : Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.stream.origin.choice("GET", 2000, Http.empty(), Bytes.new(0),
+    pooled : Http.Pool & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.stream.origin.choice(Http.pool.new(), "GET", 2000, Http.empty(), Bytes.new(0),
         "elsewhere.test", "http", "elsewhere.test", 80, "/path", None{}, "",
         Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
+    streamed : Result<&1, &1, Http.Err, Http.Stream> <- local.stream.unpool(pooled)
     j : Maybe<&2, Http.Jar> <- opened.got("proxy stream body", "proxy", (None{}, streamed))
     began : Result<&1, &1, Http.Err, Http.Up> <-
       Http.up.origin.choice("POST", 2000, Http.empty(), "elsewhere.test", "http",
@@ -663,11 +670,65 @@ def local.proxy.test() -> IO(Unit):
         "elsewhere.test", "https", "elsewhere.test", 443, "/path", None{}, "",
         Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
     local.proxy.last(second)
-    tunneled : Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.stream.origin.choice("GET", 2000, Http.empty(), Bytes.new(0),
+    tunnel : Http.Pool & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.stream.origin.choice(Http.pool.new(), "GET", 2000, Http.empty(), Bytes.new(0),
         "elsewhere.test", "https", "elsewhere.test", 443, "/path", None{}, "",
         Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
+    tunneled : Result<&1, &1, Http.Err, Http.Stream> <- local.stream.unpool(tunnel)
     local.proxy.stream.last(tunneled)
+
+def spool.end(p: Http.Pool, +name: String, got: Http.Stream & Bytes.Bytes & U32) -> IO(Http.Pool):
+  (st, body, n) = got
+  do IO<Http.Pool>:
+    local.ok(String.eq(Bytes.to_string(body), "127.0.0.1:47818"), name)
+    Http.pool.stream.close(p, st)
+
+def spool.read(+name: String, pr: Http.Pool & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Http.Pool):
+  (p, r) = pr
+  match r:
+    case Fail{e}:
+      IO.die(Http.Pool, 1, name ++ ": open failed")
+    case Done{st}:
+      do IO<Http.Pool>:
+        got : Http.Stream & Bytes.Bytes & U32 <- local.gz.read(20n, GrRead{st, Bytes.new(0), 0})
+        spool.end(p, name, got)
+
+def spool.early(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Http.Pool):
+  (p, r) = pr
+  match r:
+    case Fail{e}:
+      IO.die(Http.Pool, 1, "pooled stream: third open failed")
+    case Done{st}:
+      Http.pool.stream.close(p, st)
+
+def spool.left(pm: Http.Pool & Maybe<&1, Http.Conn>) -> IO(Unit):
+  (p, m) = pm
+  match m:
+    case None{}:
+      do IO<Unit>:
+        Http.pool.close(p)
+        local.ok(True{}, "pooled stream: a stream closed before its end keeps its connection out of the pool")
+    case Some{c}:
+      do IO<Unit>:
+        Http.conn.close(c)
+        Http.pool.close(p)
+        IO.die(Unit, 1, "pooled stream: a stream closed early gave its connection back")
+
+# The listener takes one connection, so the second and third streams must reuse it.
+def spool.test() -> IO(Unit):
+  do IO<Unit>:
+    l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47818))
+    IO.spawn(Unit, local.accept(l))
+    a : Http.Pool & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.pool.open.with(Http.pool.new(), "GET", "http://127.0.0.1:47818/a", Http.empty(), Bytes.new(0), 2000)
+    p1 : Http.Pool <- spool.read("pooled stream: first read to the end", a)
+    b : Http.Pool & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.pool.open.with(p1, "GET", "http://127.0.0.1:47818/b", Http.empty(), Bytes.new(0), 2000)
+    p2 : Http.Pool <- spool.read("pooled stream: second on the same connection", b)
+    c : Http.Pool & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.pool.open.with(p2, "GET", "http://127.0.0.1:47818/c", Http.empty(), Bytes.new(0), 2000)
+    p3 : Http.Pool <- spool.early(c)
+    spool.left(Http.pool.take(p3, Http.pool.key("http", "127.0.0.1", 47818)))
 
 # The fetch.all server answers each path after 100 ms and closes its connection.
 # Sixteen requests therefore make sixteen connections, even with pooled workers.
@@ -1005,6 +1066,7 @@ def main() -> IO(Unit):
     resolve.check()
     retry.test()
     local.proxy.test()
+    spool.test()
     all.test()
     cookie.test()
     redir.test()
