@@ -3,13 +3,13 @@
 Hairpin is an HTTP client for Bend 2, built on `bend-kit-http`. One `Client` holds a base URL, default headers, a socket pool, a cookie jar, a client certificate, a redirect mode, a step timeout, a retry policy, and a circuit breaker. Each request uses all of them. The model is undici's `Agent` with ky's instance options.
 
 ```bend
-import bend-kit-hairpin@0.11.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.12.0.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-http@0.36.0.0/http.bend as Http
+import bend-kit-http@0.37.0.0/http.bend as Http
 import bend-kit-time@0.2.0.0/time.bend as Time
 ```
 
-Import `bend-kit-http@0.36.0.0` and `bend-kit-retry@0.2.0.0`. Those are the versions `hairpin.bend` imports, and another version has a different `Http.Res` or `Retry.Budget`. `Time` supplies both `Time.mono.ms()` and the `Instant` values that Http uses.
+Import `bend-kit-http@0.37.0.0` and `bend-kit-retry@0.2.0.0`. Those are the versions `hairpin.bend` imports, and another version has a different `Http.Res` or `Retry.Budget`. `Time` supplies both `Time.mono.ms()` and the `Instant` values that Http uses.
 
 Hairpinning, or NAT loopback, is traffic that goes out and bends back. A request does the same.
 
@@ -114,7 +114,7 @@ The budget, the deadline, the backoff, and the breaker apply as for `request.in`
 
 - `~judge` takes the result of one open. Read the status and headers with `Http.stream.res`, and give the stream back in the result.
 - A refused stream closes when the next attempt is admitted. When no attempt follows, the last stream comes back open, so you can read its error body. Close every stream that comes back.
-- A stream opens its own connection, outside the pool. It follows the client's redirect mode, presents its certificate, trusts its CA file, and sends and stores cookies through its jar, as `request.as` does. The jar comes back in the client.
+- A stream opens on the client's pool: it takes an idle connection to the origin when the pool has one. `Hairpin.stream.close(c, st)` closes the stream and gives its connection back to the pool when its body was read to its end. `Http.stream.close(st)` closes the connection. A stream follows the client's redirect mode, presents its certificate, trusts its CA file, and sends and stores cookies through its jar, as `request.as` does. The jar comes back in the client.
 
 ## Circuit breaker
 
