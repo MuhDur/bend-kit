@@ -92,7 +92,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`csv`](csv) | `bend-kit-csv@0.1.0.0/csv.bend` | RFC 4180 records over `Bytes`. |
 | [`cbor`](cbor) | `bend-kit-cbor@0.1.0.1/cbor.bend` | RFC 8949 encode and decode over `Bytes`. |
 | [`protobuf`](protobuf) | `bend-kit-protobuf@0.1.0.0/protobuf.bend` | Pure bounded proto3 messages over `Bytes`, with typed `protoc` code generation. |
-| [`migrate`](migrate) | `bend-kit-migrate@0.1.0.0/migrate.bend` | Versioned subscription records: validated JSON decode, proved migrations that keep their billing meaning, and encode. |
+| [`migrate`](migrate) | `bend-kit-migrate@0.2.0.0/migrate.bend` | Versioned subscription records over `Bytes`: validated JSON decode, proved migrations that keep their billing meaning, and a proved encode/decode round trip. |
 | [`tar`](tar) | `bend-kit-tar@0.2.0.0/tar.bend` | POSIX ustar and PAX archives over `Bytes`. |
 | [`archive`](archive) | `bend-kit-archive@0.2.0.1/archive.bend` | ZIP read: stored and DEFLATE entries, checked against CRC-32. |
 | [`zlib`](zlib) | `bend-kit-zlib@0.2.0.1/zlib.bend` | DEFLATE, gzip, and zlib, plus native gzip, zstd, and brotli. |

@@ -24,11 +24,11 @@ M4 Pro, macOS 26.6, 2026-10-23. Median of five runs (`python3 run.py 5`). Times 
 
 | op | C | Rust | Bun | Node | Python | Bend |
 |---|---:|---:|---:|---:|---:|---:|
-| migrate | 20.4 (2.9x) | 11.0 (1.5x) | 7.1 (1.0x) | 10.8 (1.5x) | 35.1 (4.9x) | 83.6 (11.8x) |
+| migrate | 19.9 (2.8x) | 10.7 (1.5x) | 7.1 (1.0x) | 10.3 (1.5x) | 33.4 (4.7x) | 37.8 (5.3x) |
 
 Versions: Bend 2.0.38, Apple clang 17.0.0, cJSON 1.7.19, rustc 1.91.0, serde_json 1.0, Bun 1.3.14, Node 24.0.1, Python 3.14.6.
 
-`Json.parse.bytes` takes about 5 ms on a document this size (see `json/bench`), so most of Bend's time is in decode: every key and string becomes a `String`, and each field lookup compares strings.
+In migrate 0.1.0.0, Bend took 83.6 ms on the same input. That version turned every key and string into a `String` and compared field names as strings. 0.2.0.0 keeps text in `Bytes`, compares keys as packed words, and reads and writes numbers as digit bytes. A run that timed each phase of the Bend program measured about 10 ms to parse, 18 ms to decode, upgrade, and build the v3 values, and 11 ms to encode.
 
 ## The calls
 
