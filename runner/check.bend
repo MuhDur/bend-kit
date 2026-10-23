@@ -45,6 +45,22 @@ def show.why(w: R.Why) -> String:
     case R.WhyFailed{}:
       "failed"
 
+def show.nats(xs: List<&2, Nat>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{x, rest}:
+      " " ++ Nat.show(x) ++ show.nats(rest)
+
+def show.brk(b: Retry.State) -> String:
+  match b:
+    case Retry.CircuitClosed{fs}:
+      "closed" ++ show.nats(fs)
+    case Retry.CircuitOpen{u}:
+      "open " ++ Nat.show(u)
+    case Retry.CircuitHalf{k}:
+      "half " ++ Nat.show(k)
+
 def show(m: Maybe<&2, R.Op<String>>) -> String:
   match m:
     case None{}:
@@ -65,6 +81,8 @@ def show(m: Maybe<&2, R.Op<String>>) -> String:
       "abandon " ++ Nat.show(i) ++ " " ++ show.why(w)
     case Some{R.Revive{i, d}}:
       "revive " ++ Nat.show(i) ++ " " ++ Nat.show(d)
+    case Some{R.Break{k, b}}:
+      "break " ++ k ++ " " ++ show.brk(b)
 
 def rt(+op: R.Op<String>) -> String:
   show(R.decode(~String, ~pdec, R.encode(~String, ~penc, op)))
@@ -79,10 +97,14 @@ def live(ops: List<&2, R.Op<String>>, s: R.State<String>) -> R.State<String>:
     case Con{op, rest}:
       live(rest, R.step(~String, s, op))
 
-# Two tickets pending, one running, one requeued once, one cancelled, and one dead.
+# Two tickets pending, one running, one requeued once, one cancelled, one dead, and three breakers.
 def sample() -> R.State<String>:
   live([R.Enqueue{5n, "a"}, R.Enqueue{big(), "b|c"}, R.Enqueue{3n, ""}, R.Select{10n}, R.Requeue{2n, 20n}, R.Select{30n}, R.Enqueue{1n, "d"},
-    R.Enqueue{40n, "e"}, R.Cancel{4n}, R.Select{30n}, R.Abandon{0n, R.WhyUnsafe{}}], R.new(String))
+    R.Enqueue{40n, "e"}, R.Cancel{4n}, R.Select{30n}, R.Abandon{0n, R.WhyUnsafe{}}, R.Break{"local", Retry.CircuitClosed{[7n]}},
+    R.Break{"λ:443", Retry.CircuitClosed{[1n, big()]}}, R.Break{"h", Retry.CircuitHalf{2n}}, R.Break{"local", Retry.CircuitOpen{big()}}], R.new(String))
+
+def brk(s: R.State<String>, +key: String) -> String:
+  show.brk(R.brk.get(String, s, key))
 
 def hex(s: R.State<String>) -> String:
   Bytes.to_hex(R.encode.snap(~String, ~penc, s))
@@ -115,15 +137,20 @@ def graves(ds: List<&2, R.Dead<String>>) -> String:
       Nat.show(i) ++ ":" ++ show.why(w) ++ ":" ++ x ++ " " ++ graves(rest)
 
 def describe(s: R.State<String>) -> String:
-  R.State{Q.State{+n, +h, +run}, +ts, +ds} = s
-  "next=" ++ Nat.show(n) ++ " pending=" ++ Nat.show(R.pending(String, R.State{Q.State{n, h, run}, ts, ds})) ++ " running=" ++ Nat.show(List.length(&2, Q.Ticket<String>, run)) ++
+  R.State{Q.State{+n, +h, +run}, +ts, +ds, +bs} = s
+  "next=" ++ Nat.show(n) ++ " pending=" ++ Nat.show(R.pending(String, R.State{Q.State{n, h, run}, ts, ds, bs})) ++ " running=" ++ Nat.show(List.length(&2, Q.Ticket<String>, run)) ++
     " tries=" ++ U32.show(O.OMap.size(Nat, R.Try, ts)) ++ " fails=" ++ Nat.show(fails(O.OMap.to_list(Nat, R.Try, ts))) ++ " dead=" ++ Nat.show(List.length(&2, R.Dead<String>, ds))
 
 def snapshots() -> IO(Unit):
   do IO<Unit>:
     same(describe(sample()), "next=5 pending=2 running=1 tries=3 fails=1 dead=1", "the sample state has pending, running, retried, and dead tickets")
     same(graves(R.dead(String, sample())), "0:unsafe:a ", "a dead ticket keeps its payload and why")
-    same(rec(R.encode.snap(~String, ~penc, sample())), hex(sample()), "a snapshot decodes to the same heap, running list, tries, and dead tickets")
+    same(rec(R.encode.snap(~String, ~penc, sample())), hex(sample()), "a snapshot decodes to the same heap, running list, tries, dead tickets, and breakers")
+    same(brk(sample(), "local"), "open 1700000000123", "a later Break replaces the target's breaker")
+    same(brk(sample(), "λ:443"), "closed 1 1700000000123", "a Break keeps a closed breaker's failures")
+    same(brk(sample(), "none"), "closed", "a target with no Break is closed")
+    same(brk(R.calm(String, sample()), "h"), "half 0", "open counts no probe of a half-open breaker in flight")
+    same(brk(R.calm(String, sample()), "local"), "open 1700000000123", "open keeps an open breaker's until")
     same(rec(R.encode.snap(~String, ~penc, R.new(String))), hex(R.new(String)), "an empty snapshot round-trips")
     same(rec(R.encode(~String, ~penc, R.Cancel{8n})), "op cancel 8", "an op record decodes as an op")
     same(rec(Bytes.snd(Bytes.slice(R.encode.snap(~String, ~penc, sample()), 0, 60))), "none", "a short snapshot does not decode")
@@ -145,9 +172,16 @@ def codec() -> IO(Unit):
     same(rt(R.Abandon{11n, R.WhyUnsafe{}}), "abandon 11 unsafe", "an Abandon keeps an unsafe why")
     same(rt(R.Abandon{11n, R.WhyFailed{}}), "abandon 11 failed", "an Abandon keeps a failed why")
     same(rt(R.Revive{12n, t}), "revive 12 1700000000123", "a Revive keeps its id and deadline")
+    same(rt(R.Break{"λ:443", Retry.CircuitClosed{[t, 5n]}}), "break λ:443 closed 1700000000123 5", "a Break keeps its target and a closed breaker's failures")
+    same(rt(R.Break{"", Retry.CircuitClosed{[]}}), "break  closed", "a Break keeps an empty target and no failures")
+    same(rt(R.Break{"t", Retry.CircuitOpen{t}}), "break t open 1700000000123", "a Break keeps an open breaker's until")
+    same(rt(R.Break{"t", Retry.CircuitHalf{3n}}), "break t half 3", "a Break keeps a half-open breaker's probes")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Break{"t", Retry.CircuitHalf{3n}}), 12, 3))), "none", "a Break with an unknown kind is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.append(R.encode(~String, ~penc, R.Break{"t", Retry.CircuitHalf{3n}}), Bytes.new(4)))), "none", "a Break with octets after it is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Break{"t", Retry.CircuitHalf{3n}}), 0, 20)))), "none", "a short Break is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}}), 12, 4))), "none", "an Abandon with an unknown why is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.from_string("abc"))), "none", "a record shorter than a head is not an op")
-    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 10))), "none", "an unknown tag is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 11))), "none", "an unknown tag is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Cancel{8n}), 0, 16)))), "none", "a short Cancel is not an op")
 
 # ---- jobs: "log|kind:name". work notes the job in log, runs it, then notes "end" and the job, and answers by kind.
@@ -356,7 +390,7 @@ def root(-A: Data, h: H.Heap<Q.Ticket<A>>) -> Nat:
 
 def deferred(+now: Nat, x: R.Runner<String> & R.State<String>) -> IO(R.Runner<String>):
   (r, s) = x
-  R.State{q, ts, ds} = s
+  R.State{q, ts, ds, bs} = s
   do IO<R.Runner<String>>:
     ok(Nat.is_le(Nat.add(now, 50000n), root(String, Q.pending(String, q))), "a held job waits for the breaker's cooldown")
     return r
@@ -376,6 +410,27 @@ def breaker(+dir: String) -> IO(Unit):
     closed("next=2 pending=2 running=0 tries=2 fails=2 dead=0", "a deferral counts no failure", view(r4))
     xs : List<&2, String> <- read(log)
     same(counts(xs, ["fail:p", "fail:q"]), "fail:p=1 fail:q=1 ", "an open breaker starts no attempt")
+
+# A failing job opens the breaker, and the runner closes. After a reopen the breaker is still open,
+# so a new job of the same target waits for the cooldown and starts no attempt.
+def breaker.restart(+dir: String) -> IO(Unit):
+  +path = dir ++ "/restart.journal"
+  +log = dir ++ "/restart.log"
+  do IO<Unit>:
+    r0 : R.Runner<String> <- opened(path, 1n)
+    r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|fail:p")
+    y : R.Ran(String) <- R.drain(~String, ~penc, ~target, ~work, 20n, r1)
+    r2 : R.Runner<String> <- left(y)
+    R.close(String, r2)
+    r3 : R.Runner<String> <- opened(path, 1n)
+    r4 : R.Runner<String> <- enq(r3, 0n, log ++ "|ok:r")
+    z : R.Ran(String) <- R.drain(~String, ~penc, ~target, ~work, 20n, r4)
+    r5 : R.Runner<String> <- left(z)
+    now : Nat <- R.clock()
+    r6 : R.Runner<String> <- deferred(now, R.state(String, r5))
+    R.close(String, r6)
+    xs : List<&2, String> <- read(log)
+    same(counts(xs, ["fail:p", "ok:r"]), "fail:p=1 ok:r=0 ", "a reopen keeps the open breaker, and no attempt starts before the cooldown ends")
 
 def stat.size(r: Result<&1, &1, U32 & String, Files.Info>) -> U32:
   match r:
@@ -419,11 +474,12 @@ def far() -> Nat:
   Nat.mul(4000n, 1000000000n)
 
 # Three jobs drain, a fourth waits; compaction keeps only the live state, and reopen replays it, then the records after it.
-# max fits the longest op record, 12 octets and the payload, and the snapshot of one waiting job does not fit it.
+# max fits the longest op record: an Enqueue, 12 octets and the payload, or a Break of "local" with three failures, 60 octets.
+# The snapshot of one waiting job does not fit it.
 def compaction(+dir: String) -> IO(Unit):
   +path = dir ++ "/compact.journal"
   +log = dir ++ "/compact.log"
-  +max = (Bytes.count(log, 0) + 19 : U32)
+  +max = (Bytes.count(log, 0) + 60 : U32)
   do IO<Unit>:
     r0 : R.Runner<String> <- opened.every(path, 100n, 0, max)
     r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|ok:a")
@@ -666,6 +722,7 @@ def all(+dir: String) -> IO(Unit):
     failed(dir)
     crash(dir)
     breaker(dir)
+    breaker.restart(dir)
     overlap(dir)
     asks(dir)
     asks.cancel(dir)
