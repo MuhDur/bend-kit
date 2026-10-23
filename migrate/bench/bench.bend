@@ -18,7 +18,7 @@ def v3(p: M.V3 & M.Dropped) -> Json.Val:
   M.V3.json(r)
 
 # A record that fails to decode becomes null, so its checksum differs from the other languages.
-def one(r: Result<&2, &2, M.Error, M.Record>) -> Json.Val:
+def one(r: Result<&1, &1, M.Error, M.Record>) -> Json.Val:
   match r:
     case Fail{e}:
       Json.Null{}
