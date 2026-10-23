@@ -3,8 +3,8 @@
 An HTTP/1.1 and HTTP/2 client, and an HTTP/1.1 server. Bodies are packed `Bytes`.
 
 ```bend
-import bend-kit-http@0.36.1.0/http.bend as Http
-import bend-kit-http@0.36.1.0/completion.bend as Completion
+import bend-kit-http@0.37.0.0/http.bend as Http
+import bend-kit-http@0.37.0.0/completion.bend as Completion
 ```
 
 `Http.Body` uses `bend-kit-bytes@0.3.2.0`. JSON values for `post.json` use `bend-kit-json@0.6.1.1`. DNS lookup uses `bend-kit-dns@0.6.0.3`. TLS uses `bend-kit-wire@0.4.6.2`.
@@ -15,7 +15,7 @@ HTTPS needs OpenSSL 3. On macOS, `brew install openssl@3`. Set `BEND_LIBSSL` if 
 
 ```bend
 import Base
-import bend-kit-http@0.36.1.0/http.bend as Http
+import bend-kit-http@0.37.0.0/http.bend as Http
 
 def show(got: Result<&1, &1, Http.Err, Http.Res>) -> IO(Unit):
   match got:
@@ -75,6 +75,8 @@ A response over 16 MiB of body or 64 KiB of head is `ErrBad`. `Content-Length` t
 
 `pool.fetch` is `fetch` on a pool of idle sockets. It returns the pool beside the result. Pass that pool on. `pool.close` closes the idle sockets. The default cap is 8 idle sockets per origin. `pool.new.with(cap)` sets another. A reused socket that fails before any response byte is retried once for GET, HEAD, OPTIONS, TRACE, PUT, and DELETE. For an HTTP/2 origin, the pool keeps one session and closes it after GOAWAY.
 
+`pool.open(p, method, url, headers, body)` is `open` on a pool. It takes an idle socket to the origin when the pool has one, else it dials, and it returns the pool beside the stream. `pool.open.with` sets the timeout, and `pool.open.how` and `pool.open.raw.how` take the choices of `open.how` and `open.raw.how`. A reused socket that fails before any response byte is retried once on a new socket, for the same methods as `pool.fetch`. `pool.stream.close(p, st)` gives the socket back to the pool when the body was read to its end and decoded cleanly. It closes the socket when the stream ends early, a decoder fails, the server sent `Connection: close` or a close-delimited body, or bytes came past the body. A stream speaks HTTP/1.1 only, so an HTTP/2 session in the pool stays there and the stream dials its own socket. A redirect with an empty body gives its socket back before the next hop. `open` uses a pool of its own for one stream, so `stream.close` still closes the socket.
+
 `fetch.all(reqs, n)` runs each `Fetch{method, url, headers, body}` on at most `n` workers. Each worker owns a pool. Results stay in request order. A failure is a `Fail` in its place.
 
 `Jar` is a pure cookie store. You pass the clock: `jar.new(now)` and `jar.at(jar, now)`. `pool.fetch.jar` sends matching cookies and stores each `Set-Cookie`, including on redirects. The public-suffix check rejects only a single-label `Domain` such as `com`. It does not ship the Public Suffix List, so `Domain=co.uk` is accepted.
@@ -85,8 +87,8 @@ A convenience handler returns `IO(Reply)`. `Reply` is the `Res` plus a completio
 
 ```bend
 import Base
-import bend-kit-http@0.36.1.0/http.bend as Http
-import bend-kit-http@0.36.1.0/completion.bend as Completion
+import bend-kit-http@0.37.0.0/http.bend as Http
+import bend-kit-http@0.37.0.0/completion.bend as Completion
 
 def hello(req: Http.Req) -> IO(Http.Reply):
   Http.Req{method, path, headers, body} = req
