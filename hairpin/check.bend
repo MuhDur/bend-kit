@@ -1,9 +1,9 @@
 import Base
 import ./hairpin.bend as Hairpin
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-http@0.36.0.0/http.bend as Http
-import bend-kit-http@0.36.0.0/admission.bend as Admission
-import bend-kit-http@0.36.0.0/completion.bend as Completion
+import bend-kit-http@0.37.0.0/http.bend as Http
+import bend-kit-http@0.37.0.0/admission.bend as Admission
+import bend-kit-http@0.37.0.0/completion.bend as Completion
 import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-json@0.6.1.1/json.bend as Json
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
@@ -339,19 +339,20 @@ def piece(r: Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> String:
         case Some{b}:
           Bytes.to_string(b)
 
-def streamed.read(+name: String, +s: U32, x: Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> IO(Unit):
+def streamed.read(c: Hairpin.Client, +name: String, +s: U32, x: Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>>) -> IO(Hairpin.Client):
   (st, r) = x
   +seen = piece(r)
-  do IO<Unit>:
-    Http.stream.close(st)
+  do IO<Hairpin.Client>:
+    next : Hairpin.Client <- Hairpin.stream.close(c, st)
     ok(Bool.and(U32.is_eq(s, 200), String.eq(seen, "fine")), name ++ " (" ++ U32.show(s) ++ " " ++ seen ++ ")")
+    return next
 
-def streamed.head(+name: String, x: Http.Stream & Http.Res) -> IO(Unit):
+def streamed.head(c: Hairpin.Client, +name: String, x: Http.Stream & Http.Res) -> IO(Hairpin.Client):
   (st, res) = x
   Http.Res{+s, h, b} = res
-  do IO<Unit>:
+  do IO<Hairpin.Client>:
     y : Http.Stream & Result<&1, &1, Http.Err, Maybe<&1, Bytes.Bytes>> <- Http.stream.read(st)
-    streamed.read(name, s, y)
+    streamed.read(c, name, s, y)
 
 def streamed(+name: String, +want: Nat, r: Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, Http.Stream>) -> IO(Hairpin.Client):
   (c, b, m) = r
@@ -361,9 +362,9 @@ def streamed(+name: String, +want: Nat, r: Hairpin.Client & Retry.Budget & Resul
       IO.die(Hairpin.Client, 1, "FAIL " ++ name ++ ": no stream opened")
     case Done{st}:
       do IO<Hairpin.Client>:
-        streamed.head(name, Http.stream.res(st))
+        next : Hairpin.Client <- streamed.head(c, name, Http.stream.res(st))
         ok(Nat.is_eq(left, want), name ++ ": " ++ Nat.show(left) ++ " attempts left in the budget")
-        return c
+        return next
 
 # Two refused streams close and the third opens, all on one budget of 4.
 def opened() -> IO(Unit):
