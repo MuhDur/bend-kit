@@ -243,11 +243,16 @@ def deadlines() -> IO(Unit):
     Hairpin.close(c2)
     served("deadlines: 2 attempts", ch)
 
-# Two failures open the breaker; it denies until the 300 ms cooldown ends, then one probe closes it again.
+# Two 404s do not count. Two failures open the breaker; it denies until the 300 ms cooldown ends, then one
+# probe closes it again.
 def breaker() -> IO(Unit):
   do IO<Unit>:
-    ch : Chan(Unit) <- server(47833, [busy(), busy(), fine(), fine()])
-    c0 : Hairpin.Client = Hairpin.circuit(at(47833), Retry.Circuit{2n, 10000n, 300n, 1n})
+    ch : Chan(Unit) <- server(47833, [missing(), missing(), busy(), busy(), fine(), fine()])
+    m0 : Hairpin.Client = Hairpin.circuit(at(47833), Retry.Circuit{2n, 10000n, 300n, 1n})
+    q1 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(m0, "x")
+    m1 : Hairpin.Client <- got("breaker: a 404 does not count", 404, "missing", q1)
+    q2 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(m1, "x")
+    c0 : Hairpin.Client <- got("breaker: a second 404 leaves it closed", 404, "missing", q2)
     r1 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(c0, "x")
     c1 : Hairpin.Client <- got("breaker: first failure", 503, "busy", r1)
     r2 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(c1, "x")
@@ -260,7 +265,7 @@ def breaker() -> IO(Unit):
     r5 : Hairpin.Client & Result<&1, &1, Hairpin.Err, Http.Res> <- Hairpin.get(c4, "x")
     c5 : Hairpin.Client <- got("breaker: closed again", 200, "fine", r5)
     Hairpin.close(c5)
-    served("breaker: 4 attempts", ch)
+    served("breaker: 6 attempts", ch)
 
 def nested.c(x: Hairpin.Client & Retry.Budget) -> Hairpin.Client:
   (c, b) = x
@@ -291,13 +296,13 @@ def nested() -> IO(Unit):
     served("nested: 4 attempts on a budget of 4", ch)
 
 # Any status but 200 may clear, after Retry-After: 0.
-def judge.all(r: Result<&1, &1, Http.Err, Http.Res>) -> Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, String>:
+def judge.all(r: Result<&1, &1, Http.Err, Http.Res>) -> Result<&1, &1, Http.Err, Http.Res> & Hairpin.Verdict:
   match r:
     case Fail{e}:
-      (Fail{e}, Some{"0"})
+      (Fail{e}, Hairpin.VerdictAgain{"0"})
     case Done{res}:
       Http.Res{+s, h, b} = res
-      (Done{Http.Res{s, h, b}}, Bool.pick(Maybe<&2, String>, U32.is_eq(s, 200), None{}, Some{"0"}))
+      (Done{Http.Res{s, h, b}}, Bool.pick(Hairpin.Verdict, U32.is_eq(s, 200), Hairpin.VerdictOk{}, Hairpin.VerdictAgain{"0"}))
 
 # A caller's judge retries a 404, and a POST it calls idempotent repeats: 3 attempts.
 def judged() -> IO(Unit):
@@ -311,15 +316,15 @@ def judged() -> IO(Unit):
     served("judged: 3 attempts", ch)
 
 # Any status but 200 may clear, after Retry-After: 0.
-def judge.stream.res(x: Http.Stream & Http.Res) -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>:
+def judge.stream.res(x: Http.Stream & Http.Res) -> Result<&1, &1, Http.Err, Http.Stream> & Hairpin.Verdict:
   (st, res) = x
   Http.Res{+s, h, b} = res
-  (Done{st}, Bool.pick(Maybe<&2, String>, U32.is_eq(s, 200), None{}, Some{"0"}))
+  (Done{st}, Bool.pick(Hairpin.Verdict, U32.is_eq(s, 200), Hairpin.VerdictOk{}, Hairpin.VerdictAgain{"0"}))
 
-def judge.stream(r: Result<&1, &1, Http.Err, Http.Stream>) -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>:
+def judge.stream(r: Result<&1, &1, Http.Err, Http.Stream>) -> Result<&1, &1, Http.Err, Http.Stream> & Hairpin.Verdict:
   match r:
     case Fail{e}:
-      (Fail{e}, Some{"0"})
+      (Fail{e}, Hairpin.VerdictAgain{"0"})
     case Done{st}:
       judge.stream.res(Http.stream.res(st))
 

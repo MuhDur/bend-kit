@@ -38,15 +38,18 @@ law merge_reserved:
 
 # ---- Hairpin's outcome classification
 
-def hint(x: Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, String>) -> Maybe<&2, String>:
-  (res, m) = x
-  m
+def verdict(x: Result<&1, &1, Http.Err, Http.Res> & Hairpin.Verdict) -> Hairpin.Verdict:
+  (res, v) = x
+  v
 
 def epoch() -> Time.Instant:
   Time.Instant.of_unix(Int.I64.from_u32(0))
 
 def judged(+idem: Bool, r: Result<&1, &1, Http.Err, Http.Res>) -> Retry.Outcome:
-  Hairpin.outcome(idem, hint(Http.retry.judge(True{}, r)), epoch())
+  Hairpin.outcome(idem, verdict(Hairpin.judge(r)), epoch())
+
+def counted(r: Result<&1, &1, Http.Err, Http.Res>) -> Bool:
+  Hairpin.counts(verdict(Hairpin.judge(r)))
 
 def res(+status: U32, h: Map<&2, List<&2, String>>) -> Result<&1, &1, Http.Err, Http.Res>:
   Done{Http.Res{status, h, Bytes.new(0)}}
@@ -62,6 +65,14 @@ law outcome_get_connect:
 law outcome_post_503:
   {judged(False{}, res(503, Http.empty())) == Retry.Unsafe{} : Retry.Outcome}
 
-# Success, a client error, and an error that would repeat are settled.
+# A success and a redirect returned in manual mode are settled.
 law outcome_settled:
-  {[judged(True{}, res(200, Http.empty())), judged(True{}, res(404, Http.empty())), judged(True{}, Fail{Http.ErrDns{}})] == [Retry.Settled{}, Retry.Settled{}, Retry.Settled{}] : List<&2, Retry.Outcome>}
+  {[judged(True{}, res(200, Http.empty())), judged(True{}, res(302, Http.empty()))] == [Retry.Settled{}, Retry.Settled{}] : List<&2, Retry.Outcome>}
+
+# A client error, a server error that is not transient, and an error that would repeat are failed.
+law outcome_failed:
+  {[judged(True{}, res(404, Http.empty())), judged(True{}, res(501, Http.empty())), judged(True{}, Fail{Http.ErrDns{}})] == [Retry.Failed{}, Retry.Failed{}, Retry.Failed{}] : List<&2, Retry.Outcome>}
+
+# The breaker counts the target's failures, and not a success or a client error.
+law breaker_counts:
+  {[counted(res(200, Http.empty())), counted(res(404, Http.empty())), counted(res(501, Http.empty())), counted(Fail{Http.ErrDns{}}), counted(res(503, Http.empty()))] == [False{}, False{}, True{}, True{}, True{}] : List<&2, Bool>}

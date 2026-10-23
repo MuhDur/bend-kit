@@ -106,8 +106,8 @@ def stream.fail(+name: String, x: Hairpin.Client & Retry.Budget & Result<&1, &1,
     Hairpin.close(c)
     stream.fail.of(name, r)
 
-def judge.stream(r: Result<&1, &1, Http.Err, Http.Stream>) -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>:
-  (r, None{})
+def judge.stream(r: Result<&1, &1, Http.Err, Http.Stream>) -> Result<&1, &1, Http.Err, Http.Stream> & Hairpin.Verdict:
+  (r, Hairpin.VerdictOk{})
 
 def client(+ca: String) -> Hairpin.Client:
   Hairpin.ca(Hairpin.base(Hairpin.new(), "https://localhost:39447/"), ca)

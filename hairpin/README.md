@@ -3,7 +3,7 @@
 Hairpin is an HTTP client for Bend 2, built on `bend-kit-http`. One `Client` holds a base URL, default headers, a socket pool, a cookie jar, a client certificate, a redirect mode, a step timeout, a retry policy, and a circuit breaker. Each request uses all of them. The model is undici's `Agent` with ky's instance options.
 
 ```bend
-import bend-kit-hairpin@0.10.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.11.0.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import bend-kit-http@0.36.0.0/http.bend as Http
 import bend-kit-time@0.2.0.0/time.bend as Time
@@ -71,9 +71,11 @@ For a streamed response under the retry policy, use `open.as`. For a streamed up
 [`bend-kit-retry`](../retry) is the policy. It is pure; Hairpin reads the clock and calls it. Every `now` in the policy is monotonic milliseconds from `Time.mono.ms()`. Each request runs this loop:
 
 1. **Admit.** `Retry.admit(breaker, budget, now)` checks the deadline, then the budget, then the breaker. Only `GateGo` starts an attempt, and it takes one attempt from the budget. A denial before the first attempt is `ErrDenied{why}`; a later denial returns the last result.
-2. **Classify.** `Http.retry.judge` reads the result. A connect error, a timeout, and 408, 429, 500, 502, 503, and 504 are transient. Anything else (a success, another status, another error) is `Settled`; hairpin never answers `Retry.Failed`, so the breaker counts only transient failures. A transient failure of GET, HEAD, OPTIONS, TRACE, PUT, or DELETE is `Transient`, with the server's `Retry-After` (at most 30 s). The same failure of any other method is `Unsafe`.
-3. **Tell the breaker.** `Unsafe` and `Transient` count as failures. `Settled` counts as a success.
-4. **Plan.** `Retry.plan` stops on `Settled` and `Unsafe`. On `Transient` it waits `Retry-After`, or a backoff of 500 ms doubled per retry up to 30 s, with equal jitter (a wait in `[d/2, d]`). It stops when the budget is spent or when the wait would reach the deadline.
+2. **Classify.** The judge gives a `Hairpin.Verdict` for the result, and `Hairpin.outcome(idem, verdict, now)` turns it into a `Retry.Outcome`. `Hairpin.judge` calls a connect error, a timeout, and 408, 429, 500, 502, 503, and 504 `VerdictAgain{after}`, where `after` is the `Retry-After` value. Any other status below 400 is `VerdictOk`, another 4xx is `VerdictCaller`, and another 5xx or another error (such as DNS or TLS) is `VerdictTarget`. `VerdictOk` is `Settled`. `VerdictCaller` and `VerdictTarget` are `Failed`, because another try would repeat them. `VerdictAgain` of GET, HEAD, OPTIONS, TRACE, PUT, or DELETE is `Transient`, with the server's `Retry-After` (at most 30 s). Of any other method, it is `Unsafe`.
+3. **Tell the breaker.** `VerdictTarget` and `VerdictAgain` count as failures. `VerdictOk` and `VerdictCaller` count as successes: a client error is not the target's fault, so a run of 404s does not open the breaker. `Hairpin.counts(verdict)` gives this choice.
+4. **Plan.** `Retry.plan` stops on `Settled`, `Failed`, and `Unsafe`. On `Transient` it waits `Retry-After`, or a backoff of 500 ms doubled per retry up to 30 s, with equal jitter (a wait in `[d/2, d]`). It stops when the budget is spent or when the wait would reach the deadline.
+
+A caller that hands an outcome to [`runner`](../runner) can take it from `Hairpin.outcome(idem, verdict, now)`. Then a 404 or a DNS failure keeps the job dead, and a 503 retries it.
 
 The policy is `Retry.Policy{attempts, base, cap, deadline}`. `Hairpin.retry` sets `attempts`, and `Hairpin.deadline` sets `deadline`.
 
@@ -100,8 +102,8 @@ Every attempt of every call takes from the one budget and obeys its deadline. Th
 
 `request.in` retries only what `Http.retry.judge` calls transient, and only for an idempotent method. An API with other rules, such as Anthropic's 529 or a POST that the server deduplicates, uses `request.as`:
 
-- `~judge` takes the result of one attempt. It returns the result and `Some{Retry-After}` when another attempt may help (`Some{""}` for no header), or `None{}`. `Hairpin.judge` is the default.
-- `idem` says that the request is safe to repeat. When it is `False{}`, a judged failure counts against the breaker but never repeats.
+- `~judge` takes the result of one attempt. It returns the result and a `Hairpin.Verdict`: `VerdictOk{}`, `VerdictCaller{}`, `VerdictTarget{}`, or `VerdictAgain{after}` when another attempt may help (`after` is the `Retry-After` value, `""` for no header). `Hairpin.judge` is the default.
+- `idem` says that the request is safe to repeat. When it is `False{}`, `VerdictAgain` counts against the breaker but never repeats.
 - `enc` is the `Accept-Encoding` value. `Http.codings()` gives every coding that Http decodes. `"identity"` leaves the body as the server sent it.
 
 The budget, the deadline, the backoff, and the breaker apply as for `request.in`.
