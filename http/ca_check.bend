@@ -92,6 +92,31 @@ def stream.fail(+name: String, +want: U32, x: Maybe<&2, Http.Jar> & Result<&1, &
         case other:
           die(name ++ " was not a TLS error")
 
+def upload.sent(r: Http.Up & Result<&2, &2, Http.Err, Unit>) -> IO(Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>):
+  (up, w) = r
+  do IO<Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream>>:
+    st : Result<&1, &1, Http.Err, Http.Stream> <- Http.upload.finish(up)
+    return (None{}, st)
+
+def upload.ok(r: Result<&1, &1, Http.Err, Http.Up>) -> IO(Unit):
+  match r:
+    case Fail{e}:
+      die("upload.how ca failed")
+    case Done{up}:
+      do IO<Unit>:
+        w : Http.Up & Result<&2, &2, Http.Err, Unit> <- Http.upload.write(up, Http.from_string("hi"))
+        x : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <- upload.sent(w)
+        stream.ok("upload.how ca", x)
+
+def upload.fail(r: Result<&1, &1, Http.Err, Http.Up>) -> IO(Unit):
+  match r:
+    case Done{up}:
+      do IO<Unit>:
+        x : Result<&1, &1, Http.Err, Http.Stream> <- Http.upload.finish(up)
+        die("upload.how default store accepted private CA")
+    case Fail{e}:
+      stream.fail("upload.how default store rejects private CA", 100, (None{}, Fail{e}))
+
 def run(+ca: String) -> IO(Unit):
   do IO<Unit>:
     ok : Result<&1, &1, Http.Err, Http.Res> <-
@@ -115,6 +140,12 @@ def run(+ca: String) -> IO(Unit):
     plain : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
       Http.open.how(Http.ModeFollow{}, None{}, "", None{}, "GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), 30000)
     stream.fail("open.how default store rejects private CA", 100, plain)
+    uploaded : Result<&1, &1, Http.Err, Http.Up> <-
+      Http.upload.how(None{}, ca, "POST", "https://localhost:39446/ok", Http.empty(), 30000)
+    upload.ok(uploaded)
+    refused : Result<&1, &1, Http.Err, Http.Up> <-
+      Http.upload.how(None{}, "", "POST", "https://localhost:39446/ok", Http.empty(), 30000)
+    upload.fail(refused)
 
 def main.args(args: List<&1, String>) -> IO(Unit):
   match args:

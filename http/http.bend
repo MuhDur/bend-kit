@@ -21,7 +21,7 @@ import bend-kit-zlib@0.3.0.0/zlib.bend as Zlib
 # Bodies are Bytes. The String parsers below are the spec: one Char per octet.
 # fetch reads until frame() says the response is whole. It returns Result, not Maybe.
 # Build with -o for big bodies: the `bend file.bend` runner overflows on ~30 KB strings; native binaries do not.
-#   import bend-kit-http@0.36.0.1/http.bend as Http
+#   import bend-kit-http@0.36.1.0/http.bend as Http
 
 type Req is Type:
   Req{method: String, path: String, headers: Map<&2, List<&2, String>>, body: Bytes.Bytes}
@@ -5116,27 +5116,54 @@ def up.conn(r: Result<&1, &1, Err, Conn>, +ms: U32, +head: Bool, wire: String) -
 def up.head(+method: String, +target: String, +hf: String, +headers: Map<&2, List<&2, String>>) -> String:
   request(method, target, set(set(set(req.put(Map.to_list(&2, List<&2, String>, headers), empty()), "host", hf), "connection", "close"), "transfer-encoding", "chunked"), "")
 
-def up.origin(+method: String, +ms: U32, headers: Map<&2, List<&2, String>>, a: Url.Abs, known: Bool) -> IO(Result<&1, &1, Err, Up>):
-  Url.Abs{+scheme, +host, +port, +target} = a
+def up.route(+ms: U32, r: String & Send & Route) -> IO(Result<&1, &1, Err, Up>):
+  (key, request, route) = r
+  Send{+method, +target, +authority, +headers, body} = request
+  do IO<Result<&1, &1, Err, Up>>:
+    c : Result<&1, &1, Err, Conn> <- route.open(ms, False{}, route)
+    up.conn(c, ms, String.eq(method, "HEAD"), up.head(method, target, authority, headers))
+
+def up.origin.choice(+method: String, +ms: U32,
+    headers: Map<&2, List<&2, String>>, hf: String,
+    scheme: String, host: String, port: U32, target: String,
+    cert: Maybe<&2, Cert>, +ca: String, choice: Maybe<&2, Proxy>) ->
+    IO(Result<&1, &1, Err, Up>):
+  match choice:
+    case None{}:
+      IO.pure(Result<&1, &1, Err, Up>, Fail{ErrUrl{}})
+    case Some{proxy}:
+      up.route(ms, origin.route(method, headers, Bytes.new(0), hf, scheme, host,
+        port, target, cert, ca, proxy))
+
+def up.origin(+method: String, +ms: U32, headers: Map<&2, List<&2, String>>,
+    hf: String, a: Url.Abs, known: Bool, cert: Maybe<&2, Cert>, +ca: String) ->
+    IO(Result<&1, &1, Err, Up>):
+  Url.Abs{+scheme, +host, +port, target} = a
   match known:
     case False{}:
       IO.pure(Result<&1, &1, Err, Up>, Fail{ErrUrl{}})
     case True{}:
       do IO<Result<&1, &1, Err, Up>>:
-        ips : List<&2, String> <- Dns.resolve.all(host)
-        c : Result<&1, &1, Err, Conn> <- conn.open.all(String.eq(scheme, "https"), ms, host, port, ips, None{}, False{}, "")
-        up.conn(c, ms, String.eq(method, "HEAD"), up.head(method, target, Url.host_field(a), headers))
+        choice : Maybe<&2, Proxy> <- proxy.select(scheme, host, port)
+        up.origin.choice(method, ms, headers, hf, scheme, host, port, target,
+          cert, ca, choice)
 
-def up.url(+method: String, +ms: U32, headers: Map<&2, List<&2, String>>, u: Maybe<&2, Url.Abs>) -> IO(Result<&1, &1, Err, Up>):
+def up.url(+method: String, +ms: U32, headers: Map<&2, List<&2, String>>,
+    u: Maybe<&2, Url.Abs>, cert: Maybe<&2, Cert>, +ca: String) ->
+    IO(Result<&1, &1, Err, Up>):
   match u:
     case None{}:
       IO.pure(Result<&1, &1, Err, Up>, Fail{ErrUrl{}})
     case Some{+a}:
-      up.origin(method, ms, headers, a, pool.scheme.ok(a))
+      up.origin(method, ms, headers, Url.host_field(a), a, pool.scheme.ok(a), cert, ca)
 
-# Http.upload(method, url, headers) sends the head. A streamed body cannot be replayed, so redirects are not followed.
+# cert and ca as in open.how. A streamed body cannot be replayed, so redirects are not followed.
+def upload.how(cert: Maybe<&2, Cert>, +ca: String, +method: String, url: String,
+    headers: Map<&2, List<&2, String>>, +ms: U32) -> IO(Result<&1, &1, Err, Up>):
+  up.url(method, ms, headers, Url.absolute(url), cert, ca)
+
 def upload.with(+method: String, url: String, headers: Map<&2, List<&2, String>>, +ms: U32) -> IO(Result<&1, &1, Err, Up>):
-  up.url(method, ms, headers, Url.absolute(url))
+  upload.how(None{}, "", method, url, headers, ms)
 
 def upload(+method: String, url: String, headers: Map<&2, List<&2, String>>) -> IO(Result<&1, &1, Err, Up>):
   upload.with(method, url, headers, 30000)
