@@ -36,6 +36,16 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+    def do_POST(self):
+        while True:
+            n = int(self.rfile.readline().split(b";")[0], 16)
+            self.rfile.read(n + 2)
+            if n == 0:
+                break
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
     def log_message(self, fmt, *args):
         pass
 s = ThreadingHTTPServer(("127.0.0.1", 39446), H)

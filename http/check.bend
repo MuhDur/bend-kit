@@ -507,9 +507,9 @@ def retry.test() -> IO(Unit):
     retry.check("post.json", 200, "POST application/json [1,true]", posted)
 
 def local.proxy.http(req: Http.Req) -> IO(Http.Res):
-  Http.Req{method, path, +headers, body} = req
+  Http.Req{+method, path, +headers, body} = req
   do IO<Http.Res>:
-    local.ok(String.eq(method, "GET"), "proxy HTTP method")
+    local.ok(Bool.or(String.eq(method, "GET"), String.eq(method, "POST")), "proxy HTTP method")
     local.ok(String.eq(path, "http://elsewhere.test/path"), "proxy absolute-form")
     local.ok(String.eq(Http.header(headers, "host"), "elsewhere.test"), "proxy origin Host")
     local.ok(String.eq(Http.header(headers, "proxy-authorization"), "Basic dTpw"),
@@ -559,14 +559,16 @@ def local.proxy.http.accept(inbox: Chan(Admission.Command), m: Listener & Result
     IO(Listener):
   Http.conn(~(req => local.reply(local.proxy.http(req))), ~Completion.ignore, Http.limits(1048576n), inbox, m)
 
-# Two forward requests, then two CONNECT tunnels: pool, then stream, each time.
+# Three forward requests, then two CONNECT tunnels: pool, stream, and upload, then pool and stream.
 def local.proxy.serve(l: Listener) -> IO(Unit):
   do IO<Unit>:
     +inbox : Chan(Admission.Command) <- Admission.open(Admission.Caps{128, 128, 128})
     first : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
     l1 : Listener <- local.proxy.http.accept(inbox, first)
     second : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l1)
-    l2 : Listener <- local.proxy.http.accept(inbox, second)
+    l2a : Listener <- local.proxy.http.accept(inbox, second)
+    upload : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l2a)
+    l2 : Listener <- local.proxy.http.accept(inbox, upload)
     third : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l2)
     l3 : Listener <- local.proxy.tunnel.accept(third)
     fourth : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l3)
@@ -620,6 +622,22 @@ def local.proxy.last(pr: Http.Pool & Result<&1, &1, Http.Err, Http.Res>) ->
     Http.pool.close(p)
     local.proxy.last.result(result)
 
+# A failed write stays in the Up, so upload.finish reports it.
+def local.proxy.upload.wrote(r: Http.Up & Result<&2, &2, Http.Err, Unit>) ->
+    IO(Result<&1, &1, Http.Err, Http.Stream>):
+  (up, w) = r
+  Http.upload.finish(up)
+
+def local.proxy.upload(r: Result<&1, &1, Http.Err, Http.Up>) ->
+    IO(Result<&1, &1, Http.Err, Http.Stream>):
+  match r:
+    case Fail{e}:
+      IO.die(Result<&1, &1, Http.Err, Http.Stream>, 1, "proxy upload connect failed")
+    case Done{up}:
+      do IO<Result<&1, &1, Http.Err, Http.Stream>>:
+        w : Http.Up & Result<&2, &2, Http.Err, Unit> <- Http.upload.write(up, Bytes.from_string("hi"))
+        local.proxy.upload.wrote(w)
+
 def local.proxy.test() -> IO(Unit):
   do IO<Unit>:
     l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47815))
@@ -634,6 +652,12 @@ def local.proxy.test() -> IO(Unit):
         "elsewhere.test", "http", "elsewhere.test", 80, "/path", None{}, "",
         Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
     j : Maybe<&2, Http.Jar> <- opened.got("proxy stream body", "proxy", (None{}, streamed))
+    began : Result<&1, &1, Http.Err, Http.Up> <-
+      Http.up.origin.choice("POST", 2000, Http.empty(), "elsewhere.test", "http",
+        "elsewhere.test", 80, "/path", None{}, "",
+        Http.proxy.from.url("http://u:p@127.0.0.1:47815"))
+    uploaded : Result<&1, &1, Http.Err, Http.Stream> <- local.proxy.upload(began)
+    ju : Maybe<&2, Http.Jar> <- opened.got("proxy upload body", "proxy", (None{}, uploaded))
     second : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
       Http.pool.origin.choice(p, "GET", 2000, Http.empty(), Bytes.new(0),
         "elsewhere.test", "https", "elsewhere.test", 443, "/path", None{}, "",
