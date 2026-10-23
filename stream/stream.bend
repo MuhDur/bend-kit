@@ -1,7 +1,7 @@
 # Bounded packed-byte transfers between files and TCP/TLS sockets.
 import Base
 import bend-kit-files@0.2.0.0/files.bend as Files
-import bend-kit-wire@0.4.6.1/wire.bend as Wire
+import bend-kit-wire@0.4.6.2/wire.bend as Wire
 
 type Error is Data:
   BadChunk{}
