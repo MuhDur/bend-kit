@@ -150,15 +150,38 @@ def hint.ms(m: Maybe<&2, U32>) -> Maybe<&2, Nat>:
     case Some{ms}:
       Some{U32.to_nat(ms)}
 
-# m is Http.retry.judge's verdict for an idempotent request: Some{Retry-After} when another try may help.
-# None is Settled, so the breaker counts any other response or error as a success.
-# A non-idempotent request with that verdict is Unsafe: the breaker counts it, but it never repeats.
-def outcome(+idem: Bool, m: Maybe<&2, String>, now: Time.Instant) -> Retry.Outcome:
-  match m:
-    case None{}:
+# A judge's verdict on one attempt. Ok: a success. Caller: the request is at fault (a 4xx), so it stops
+# and the breaker does not count it. Target: the target failed in a way another try would repeat, so it
+# stops and the breaker counts it. Again: another try may help; after is the Retry-After value, "" for none.
+type Verdict is Data:
+  VerdictOk{}
+  VerdictCaller{}
+  VerdictTarget{}
+  VerdictAgain{after: String}
+
+# Ok and Caller do not count against the breaker; Target and Again do.
+def counts(v: Verdict) -> Bool:
+  match v:
+    case VerdictOk{}:
+      False{}
+    case VerdictCaller{}:
+      False{}
+    case VerdictTarget{}:
+      True{}
+    case VerdictAgain{after}:
+      True{}
+
+# Ok is Settled; Caller and Target are Failed. Again is Transient for an idempotent request, else Unsafe.
+def outcome(+idem: Bool, v: Verdict, now: Time.Instant) -> Retry.Outcome:
+  match v:
+    case VerdictOk{}:
       Retry.Settled{}
-    case Some{+v}:
-      Bool.pick(Retry.Outcome, idem, Retry.Transient{hint.ms(Http.retry.after(v, now))}, Retry.Unsafe{})
+    case VerdictCaller{}:
+      Retry.Failed{}
+    case VerdictTarget{}:
+      Retry.Failed{}
+    case VerdictAgain{+after}:
+      Bool.pick(Retry.Outcome, idem, Retry.Transient{hint.ms(Http.retry.after(after, now))}, Retry.Unsafe{})
 
 def lift(-R: Type, r: Result<&1, &1, Http.Err, R>) -> Result<&1, &1, Err, R>:
   match r:
@@ -210,15 +233,19 @@ def deadline.some(b: Retry.Budget) -> Bool:
   Retry.Budget{l, d} = b
   some(d)
 
-# The wall clock dates a Retry-After, so it is read only for a transient failure.
-def outcome.io(+idem: Bool, m: Maybe<&2, String>) -> IO(Retry.Outcome):
-  match m:
-    case None{}:
-      IO.pure(Retry.Outcome, Retry.Settled{})
-    case Some{v}:
+# The wall clock dates a Retry-After, so it is read only for Again.
+def outcome.io(+idem: Bool, v: Verdict) -> IO(Retry.Outcome):
+  match v:
+    case VerdictAgain{after}:
       do IO<Retry.Outcome>:
         wall : Time.Instant <- Time.now()
-        return outcome(idem, Some{v}, wall)
+        return outcome(idem, VerdictAgain{after}, wall)
+    case VerdictOk{}:
+      IO.pure(Retry.Outcome, Retry.Settled{})
+    case VerdictCaller{}:
+      IO.pure(Retry.Outcome, Retry.Failed{})
+    case VerdictTarget{}:
+      IO.pure(Retry.Outcome, Retry.Failed{})
 
 # Jitter for the backoff, drawn only when a retry may follow.
 def jitter.io(need: Bool) -> IO(Nat):
@@ -230,30 +257,51 @@ def jitter.io(need: Bool) -> IO(Nat):
     case False{}:
       IO.pure(Nat, 0n)
 
-def settle.at(-R: Type, +now: Nat, +rnd: Nat, +p: Retry.Policy, +n: Nat, +o: Retry.Outcome, br: Retry.Breaker, +b: Retry.Budget,
+# hit: the breaker counts this attempt as a failure.
+def settle.at(-R: Type, +now: Nat, +rnd: Nat, +p: Retry.Policy, +n: Nat, hit: Bool, +o: Retry.Outcome, br: Retry.Breaker, +b: Retry.Budget,
     body: Bytes.Bytes, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, r: Result<&1, &1, Http.Err, R>) -> Step<R>:
-  Step{pool, jar, Retry.Breaker.done(br, now, Retry.failed(o)), b, body, Some{lift(R, r)}, Retry.plan(o, p, b, n, now, rnd)}
+  Step{pool, jar, Retry.Breaker.done(br, now, hit), b, body, Some{lift(R, r)}, Retry.plan(o, p, b, n, now, rnd)}
 
 # The attempt has ended: tell the breaker, and plan the next step.
-def settle.outcome(-R: Type, +p: Retry.Policy, +n: Nat, +o: Retry.Outcome, +br: Retry.Breaker, b: Retry.Budget, body: Bytes.Bytes,
+def settle.outcome(-R: Type, +p: Retry.Policy, +n: Nat, hit: Bool, +o: Retry.Outcome, +br: Retry.Breaker, b: Retry.Budget, body: Bytes.Bytes,
     pool: Http.Pool, jar: Maybe<&2, Http.Jar>, r: Result<&1, &1, Http.Err, R>) -> IO(Step<R>):
   do IO<Step<R>>:
     now : Nat <- clock(Bool.or(breaker.on(br), transient(o)))
     rnd : Nat <- jitter.io(transient(o))
-    return settle.at(R, now, rnd, p, n, o, br, b, body, pool, jar, r)
+    return settle.at(R, now, rnd, p, n, hit, o, br, b, body, pool, jar, r)
 
 def settle.judged(-R: Type, +p: Retry.Policy, +idem: Bool, +n: Nat, br: Retry.Breaker, b: Retry.Budget, body: Bytes.Bytes,
-    pool: Http.Pool, jar: Maybe<&2, Http.Jar>, j: Result<&1, &1, Http.Err, R> & Maybe<&2, String>) -> IO(Step<R>):
-  (r, m) = j
+    pool: Http.Pool, jar: Maybe<&2, Http.Jar>, j: Result<&1, &1, Http.Err, R> & Verdict) -> IO(Step<R>):
+  (r, +v) = j
   do IO<Step<R>>:
-    o : Retry.Outcome <- outcome.io(idem, m)
-    settle.outcome(R, p, n, o, br, b, body, pool, jar, r)
+    o : Retry.Outcome <- outcome.io(idem, v)
+    settle.outcome(R, p, n, counts(v), o, br, b, body, pool, jar, r)
 
-# The default judge: Http.retry.judge, as if the request were idempotent; outcome then applies idem.
-def judge(r: Result<&1, &1, Http.Err, Http.Res>) -> Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, String>:
-  Http.retry.judge(True{}, r)
+# A status that Http.retry.judge does not retry: below 400 is Ok, a 4xx is Caller, and the rest is Target.
+def judge.status(+s: U32) -> Verdict:
+  Bool.pick(Verdict, U32.is_lt(s, 400), VerdictOk{}, Bool.pick(Verdict, U32.is_lt(s, 500), VerdictCaller{}, VerdictTarget{}))
 
-def settle(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Maybe<&2, String>,
+def judge.settled(r: Result<&1, &1, Http.Err, Http.Res>) -> Result<&1, &1, Http.Err, Http.Res> & Verdict:
+  match r:
+    case Fail{e}:
+      (Fail{e}, VerdictTarget{})
+    case Done{res}:
+      Http.Res{+s, h, b} = res
+      (Done{Http.Res{s, h, b}}, judge.status(s))
+
+def judge.of(x: Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, String>) -> Result<&1, &1, Http.Err, Http.Res> & Verdict:
+  (r, m) = x
+  match m:
+    case Some{after}:
+      (r, VerdictAgain{after})
+    case None{}:
+      judge.settled(r)
+
+# The default judge: Http.retry.judge, as if the request were idempotent, picks Again; outcome then applies idem.
+def judge(r: Result<&1, &1, Http.Err, Http.Res>) -> Result<&1, &1, Http.Err, Http.Res> & Verdict:
+  judge.of(Http.retry.judge(True{}, r))
+
+def settle(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Verdict,
     +p: Retry.Policy, +idem: Bool, +n: Nat, br: Retry.Breaker, b: Retry.Budget, body: Bytes.Bytes,
     x: Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>) -> IO(Step<R>):
   (pool, jar, r) = x
@@ -302,7 +350,7 @@ def close.last(~R: Type, ~close: R -> IO(Unit), last: Maybe<&1, Result<&1, &1, E
         case Done{x}:
           close(x)
 
-def attempt.run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Maybe<&2, String>,
+def attempt.run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Verdict,
     ~try: Opts -> Call -> Http.Pool -> Maybe<&2, Http.Jar> -> Bytes.Bytes -> IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>),
     +o: Opts, +call: Call, +idem: Bool, +n: Nat, pool: Http.Pool, jar: Maybe<&2, Http.Jar>, br: Retry.Breaker,
     b: Retry.Budget, r: Bytes.Bytes & Bytes.Bytes) -> IO(Step<R>):
@@ -320,7 +368,7 @@ def denied(-R: Type, why: Retry.Deny, last: Maybe<&1, Result<&1, &1, Err, R>>) -
       Some{r}
 
 # A refused stream closes only when the next attempt is admitted, so a denied attempt still returns it.
-def attempt.gate(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Maybe<&2, String>,
+def attempt.gate(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Verdict,
     ~try: Opts -> Call -> Http.Pool -> Maybe<&2, Http.Jar> -> Bytes.Bytes -> IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>),
     ~close: R -> IO(Unit),
     x: Retry.Breaker & Retry.Budget & Retry.Gate, +o: Opts, +call: Call, +idem: Bool, +n: Nat, pool: Http.Pool,
@@ -336,7 +384,7 @@ def attempt.gate(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1,
 
 # Ask the gate; when it admits, make attempt n (0 first) of this layer. With no deadline and no breaker,
 # admission does not read the clock.
-def attempt(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Maybe<&2, String>,
+def attempt(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Verdict,
     ~try: Opts -> Call -> Http.Pool -> Maybe<&2, Http.Jar> -> Bytes.Bytes -> IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>),
     ~close: R -> IO(Unit),
     +o: Opts, +call: Call, +idem: Bool, +n: Nat, s: Step<R>) -> IO(Step<R>):
@@ -353,7 +401,7 @@ def pause(ms: Nat) -> IO(Unit):
       IO.sleep(U32.from_nat(1n+k))
 
 # left: attempts this layer may still make. n: attempts made so far. Each turn follows the plan of the last step.
-def go(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Maybe<&2, String>,
+def go(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Verdict,
     ~try: Opts -> Call -> Http.Pool -> Maybe<&2, Http.Jar> -> Bytes.Bytes -> IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>),
     ~close: R -> IO(Unit),
     left: Nat, +n: Nat, +o: Opts, +call: Call, +idem: Bool, s: Step<R>) -> IO(Step<R>):
@@ -394,7 +442,7 @@ def budget(c: Client) -> IO(Client & Retry.Budget):
     now : Nat <- clock(some(d))
     return (Client{o, pool, jar, br}, Retry.Budget.new(a, now, d))
 
-def run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Maybe<&2, String>,
+def run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err, R> & Verdict,
     ~try: Opts -> Call -> Http.Pool -> Maybe<&2, Http.Jar> -> Bytes.Bytes -> IO(Http.Pool & Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, R>),
     ~close: R -> IO(Unit),
     c: Client, b: Retry.Budget, +idem: Bool, enc: String, method: String, url: String,
@@ -410,9 +458,9 @@ def run(~R: Type, ~judge: Result<&1, &1, Http.Err, R> -> Result<&1, &1, Http.Err
 # caller's shared budget, and obeys its deadline; the client's own policy caps the attempts of this call.
 # The budget left comes back beside the result: pass it to the next call, so nested layers never reset or
 # multiply it. The client's own deadline does not apply here; b's does.
-# judge: Some{Retry-After} when another attempt may help. idem: the request is safe to repeat, so a judged
-# failure is retried; else the breaker counts it and it never repeats. enc: the Accept-Encoding codings.
-def request.as(~judge: Result<&1, &1, Http.Err, Http.Res> -> Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, String>,
+# judge: the Verdict on each attempt; Hairpin.judge is the default. idem: the request is safe to repeat, so
+# Again is retried; else the breaker counts it and it never repeats. enc: the Accept-Encoding codings.
+def request.as(~judge: Result<&1, &1, Http.Err, Http.Res> -> Result<&1, &1, Http.Err, Http.Res> & Verdict,
     c: Client, b: Retry.Budget, +idem: Bool, +enc: String, +method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Client & Retry.Budget & Result<&1, &1, Err, Http.Res>):
   run(~Http.Res, ~judge, ~try.res, ~close.res, c, b, idem, enc, method, url, headers, body)
@@ -422,7 +470,7 @@ def request.as(~judge: Result<&1, &1, Http.Err, Http.Res> -> Result<&1, &1, Http
 # and stores cookies through its jar, as request.as does. judge reads the status and headers through
 # Http.stream.res. A refused stream closes before the next attempt; the last one comes back open, so the
 # caller can read its body.
-def open.as(~judge: Result<&1, &1, Http.Err, Http.Stream> -> Result<&1, &1, Http.Err, Http.Stream> & Maybe<&2, String>,
+def open.as(~judge: Result<&1, &1, Http.Err, Http.Stream> -> Result<&1, &1, Http.Err, Http.Stream> & Verdict,
     c: Client, b: Retry.Budget, +idem: Bool, +enc: String, +method: String, url: String,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes) -> IO(Client & Retry.Budget & Result<&1, &1, Err, Http.Stream>):
   run(~Http.Stream, ~judge, ~try.stream, ~Http.stream.close, c, b, idem, enc, method, url, headers, body)
