@@ -5,9 +5,9 @@ import bend-kit-time@0.2.0.0/time.bend as Time
 import bend-kit-int@0.2.0.0/int.bend as Int
 import bend-kit-encoding@0.4.0.0/encoding.bend as Enc
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-hairpin@0.10.0.0/hairpin.bend as Hairpin
+import bend-kit-hairpin@0.12.0.0/hairpin.bend as Hairpin
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-http@0.36.0.0/http.bend as Http
+import bend-kit-http@0.37.0.0/http.bend as Http
 
 # Every MAC is HMAC-SHA256 over the body exactly as received, never a re-encoding of parsed JSON.
 # Headers are Http.Req headers: lowercase names, octet-string values. Each verify hands the body back.
@@ -440,7 +440,7 @@ def send.result(x: Hairpin.Client & Retry.Budget & Result<&1, &1, Hairpin.Err, H
       (c, b, Done{res})
 
 # A timeout, a refused connect, 408, 429, or any 5xx may clear.
-def send.judge(r: Result<&1, &1, Http.Err, Http.Res>) ->
+def send.again(r: Result<&1, &1, Http.Err, Http.Res>) ->
     Result<&1, &1, Http.Err, Http.Res> & Maybe<&2, String>:
   match r:
     case Fail{e}:
@@ -449,6 +449,9 @@ def send.judge(r: Result<&1, &1, Http.Err, Http.Res>) ->
       Http.Res{+status, +headers, body} = res
       +again = Bool.or(Http.retry.status(status), U32.is_eq((status / 100 : U32), 5))
       (Done{Http.Res{status, headers, body}}, Bool.pick(Maybe<&2, String>, again, Some{Http.header(headers, "retry-after")}, None{}))
+
+def send.judge(r: Result<&1, &1, Http.Err, Http.Res>) -> Result<&1, &1, Http.Err, Http.Res> & Hairpin.Verdict:
+  Hairpin.judge.of(send.again(r))
 
 # Receivers deduplicate on the event ID, so the POST is safe to repeat.
 def send.signed(c: Hairpin.Client, b: Retry.Budget, +url: String, r: Bytes.Bytes & Result<&1, &1, Err, Map<&2, List<&2, String>>>) ->

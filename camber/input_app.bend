@@ -2,7 +2,7 @@
 import Base
 import ./camber.bend as C
 import ./input.bend as Input
-import bend-kit-http@0.36.0.0/http.bend as H
+import bend-kit-http@0.37.0.0/http.bend as H
 import bend-kit-router@0.2.0.0/target.bend as Target
 import bend-kit-json@0.6.1.1/json.bend as J
 
