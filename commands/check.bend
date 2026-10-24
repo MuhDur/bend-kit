@@ -1,5 +1,5 @@
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import ./commands.bend as C
 import ./ledger.bend as L
 
@@ -118,7 +118,7 @@ def inflight.go(a: C.Store, +b: C.Store) -> IO(Unit):
     r : Result<&1, &1, U32 & String, C.Reply<Bytes.Bytes>> <- C.handle(~L.decide, b, "evt_5", Bytes.from_string(credit("a", "7")), 200)
     busy(r)
     s : Bytes.Bytes <- IO.try(Bytes.Bytes, C.state.get(read))
-    step : C.Step<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes, Bytes.Bytes> = C.step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~C.same, ~C.dup, ~C.dup, ~L.decide, None{}, s, Bytes.from_string(credit("a", "7")), 200)
+    step : C.Step<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes, Bytes.Bytes> = C.step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~C.same, ~Bytes.clone, ~Bytes.clone, ~L.decide, None{}, s, Bytes.from_string(credit("a", "7")), 200)
     w : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.written(step, commit, save, keep, emit, "evt_5"))
     same(L.reply.show(w), "fresh accepted 308", "the first writer commits")
     handled(b, "evt_5", credit("a", "7"), 200, "replayed accepted 308", "the second writer's retry replays")

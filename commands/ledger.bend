@@ -1,7 +1,7 @@
 # A payment ledger fed by webhook events: each event id is a command id, so a redelivered event applies once.
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-json@0.6.1.1/json.bend as Json
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import bend-kit-json@0.7.0.0/json.bend as Json
 import bend-kit-collections@0.1.3.0/omap.bend as O
 import ./commands.bend as C
 
@@ -20,7 +20,7 @@ def books.put.n(n: Maybe<&2, U32>, m: Maybe<&2, Books()>, +k: String) -> Maybe<&
 def books.put(v: Json.Val, +k: String, m: Maybe<&2, Books()>) -> Maybe<&2, Books()>:
   match v:
     case Json.Num{b}:
-      books.put.n(U32.read(Bytes.to_string(b)), m, k)
+      books.put.n(Bytes.u32.read(b), m, k)
     case _:
       None{}
 
@@ -48,7 +48,7 @@ def encode.go(xs: List<&1, String & U32>) -> List<&1, Bytes.Bytes & Json.Val>:
       Nil{}
     case Con{kv, rest}:
       (k, n) = kv
-      Con{(Bytes.from_string(k), Json.Num{Bytes.from_string(U32.show(n))}), encode.go(rest)}
+      Con{(Bytes.from_string(k), Json.Num{Bytes.u32.show(n)}), encode.go(rest)}
 
 def encode(m: Books()) -> Bytes.Bytes:
   Json.encode.bytes(Json.Obj{encode.go(O.OMap.to_list(String, U32, m))})
@@ -75,7 +75,7 @@ def field(v: Json.Val, +k: String, f: Fields) -> Fields:
     case Json.Str{b}:
       field.str(k, Bytes.to_string(b), f)
     case Json.Num{b}:
-      field.num(k, U32.read(Bytes.to_string(b)), f)
+      field.num(k, Bytes.u32.read(b), f)
     case _:
       f
 
@@ -117,7 +117,7 @@ def balance(m: Maybe<&2, U32>) -> U32:
       0
 
 def accepted(m: Books(), +a: String, +n: U32) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
-  C.Accept{encode(O.OMap.put(~String, ~U32, ~String.order, m, a, n)), Bytes.from_string(U32.show(n)), [Bytes.from_string(a ++ "=" ++ U32.show(n))]}
+  C.Accept{encode(O.OMap.put(~String, ~U32, ~String.order, m, a, n)), Bytes.u32.show(n), [Bytes.from_string(a ++ "=" ++ U32.show(n))]}
 
 def settle(ok: Bool, m: Books(), +a: String, +n: U32, why: String) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   match ok:

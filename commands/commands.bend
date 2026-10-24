@@ -1,6 +1,6 @@
 # Retry-safe commands: deduplicate by command id, replay recorded results, and commit state, record, and outbox in one SQLite transaction. Source: https://github.com/paymog/bend-kit/tree/main/commands
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import bend-kit-sqlite@0.1.0.1/sqlite.bend as Sqlite
 
 # ---- the pure processor
@@ -152,14 +152,6 @@ def same.of(r: Bytes.Bytes & Bytes.Bytes & Bool) -> Bool:
 # The payload comparison that handle gives step: every byte, NUL included.
 def same(a: Bytes.Bytes, b: Bytes.Bytes) -> Bool:
   same.of(Bytes.eq(a, b))
-
-def dup.of(+n: U32, ww: Array<U32> & Array<U32>) -> Bytes.Bytes & Bytes.Bytes:
-  (w, w2) = ww
-  (Bytes.Bytes{n, w}, Bytes.Bytes{n, w2})
-
-def dup(b: Bytes.Bytes) -> Bytes.Bytes & Bytes.Bytes:
-  Bytes.Bytes{+n, w} = b
-  dup.of(n, Array.clone(U32, w))
 
 # ---- the store
 
@@ -316,9 +308,9 @@ def handle.found(
     case None{}:
       do Run<Reply<Bytes.Bytes>>:
         s : Bytes.Bytes <- state.get(read)
-        written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~dup, ~dup, ~decide, None{}, s, payload, at), commit, save, keep, emit, id)
+        written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~Bytes.clone, ~Bytes.clone, ~decide, None{}, s, payload, at), commit, save, keep, emit, id)
     case Some{rec}:
-      written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~dup, ~dup, ~decide, Some{rec}, Bytes.new(0), payload, at), commit, save, keep, emit, id)
+      written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~Bytes.clone, ~Bytes.clone, ~decide, Some{rec}, Bytes.new(0), payload, at), commit, save, keep, emit, id)
 
 def handle.txn(
   ~decide: Bytes.Bytes -> Bytes.Bytes -> Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>,
