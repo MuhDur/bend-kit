@@ -614,3 +614,56 @@ law fits_exact:
   for i: U32
   for n: U32
   {Bytes.fits(len, i, n) == Nat.is_le(Nat.add(U32.to_nat(i), U32.to_nat(n)), U32.to_nat(len)) : Bool}
+
+def both(r: Bytes.Bytes & Bytes.Bytes) -> String & String:
+  (a, b) = r
+  (str(a), str(b))
+
+law clone_same:
+  {both(Bytes.clone(of(bytes([104, 0, 255, 105, 33])))) == (bytes([104, 0, 255, 105, 33]), bytes([104, 0, 255, 105, 33])) : String & String}
+
+law clone_empty:
+  {both(Bytes.clone(of(""))) == ("", "") : String & String}
+
+# Decimal U32: both ends of the range, a digit-count step, and each way to fail.
+law u32_read_zero:
+  {Bytes.u32.read(of("0")) == Some{0} : Maybe<&2, U32>}
+
+law u32_read_leading_zeros:
+  {Bytes.u32.read(of("007")) == Some{7} : Maybe<&2, U32>}
+
+law u32_read_max:
+  {Bytes.u32.read(of("4294967295")) == Some{4294967295} : Maybe<&2, U32>}
+
+law u32_read_overflow:
+  {Bytes.u32.read(of("4294967296")) == None{} : Maybe<&2, U32>}
+
+law u32_read_overflow_wide:
+  {Bytes.u32.read(of("10000000000")) == None{} : Maybe<&2, U32>}
+
+law u32_read_empty:
+  {Bytes.u32.read(of("")) == None{} : Maybe<&2, U32>}
+
+law u32_read_non_digit:
+  {Bytes.u32.read(of("12a")) == None{} : Maybe<&2, U32>}
+
+law u32_read_sign:
+  {Bytes.u32.read(of("-1")) == None{} : Maybe<&2, U32>}
+
+law u32_read_colon:
+  {Bytes.u32.read(of("1:")) == None{} : Maybe<&2, U32>}
+
+law u32_show_zero:
+  {str(Bytes.u32.show(0)) == "0" : String}
+
+law u32_show_nine:
+  {str(Bytes.u32.show(9)) == "9" : String}
+
+law u32_show_ten:
+  {str(Bytes.u32.show(10)) == "10" : String}
+
+law u32_show_max:
+  {str(Bytes.u32.show(4294967295)) == "4294967295" : String}
+
+law u32_roundtrip:
+  {Bytes.u32.read(Bytes.u32.show(1234567)) == Some{1234567} : Maybe<&2, U32>}

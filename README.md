@@ -14,7 +14,7 @@ You need [Bend 2.0.38 or newer](https://bend-lang.com/install.sh) and [Bun 1.4.2
 
 ```bend
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 
 def show(r: Bytes.Bytes & U32) -> IO(Unit):
   (b, n) = r
@@ -73,7 +73,7 @@ Each package README has the import, one example, and the limits that change the 
 
 | Package | Import | What it does |
 |---|---|---|
-| [`bytes`](bytes) | `bend-kit-bytes@0.3.2.0/bytes.bend` | Packed byte buffers, cursors, endian integers, search, hex, and base64. |
+| [`bytes`](bytes) | `bend-kit-bytes@0.3.3.0/bytes.bend` | Packed byte buffers, cursors, endian integers, search, hex, base64, and decimal U32. |
 | [`encoding`](encoding) | `bend-kit-encoding@0.4.0.0/encoding.bend` | UTF-8 between `String` and `Bytes`. |
 | [`unicode`](unicode) | `bend-kit-unicode@0.1.0.0/unicode.bend` | Unicode 17.0 category, NFC/NFD, case folding, and grapheme clusters. |
 | [`regex`](regex) | `bend-kit-regex@0.7.0.0/regex.bend` | Linear-time RE2 matching, with capture groups. |
