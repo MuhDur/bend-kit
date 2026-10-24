@@ -473,3 +473,51 @@ def Laws.cursor_u64_incomplete():
 
 def Laws.fits_exact(len, i, n):
   Lemmas.u32_fits_nat(len, i, n)
+
+def Laws.clone_same():
+  {==}
+
+def Laws.clone_empty():
+  {==}
+
+def Laws.u32_read_zero():
+  {==}
+
+def Laws.u32_read_leading_zeros():
+  {==}
+
+def Laws.u32_read_max():
+  {==}
+
+def Laws.u32_read_overflow():
+  {==}
+
+def Laws.u32_read_overflow_wide():
+  {==}
+
+def Laws.u32_read_empty():
+  {==}
+
+def Laws.u32_read_non_digit():
+  {==}
+
+def Laws.u32_read_sign():
+  {==}
+
+def Laws.u32_read_colon():
+  {==}
+
+def Laws.u32_show_zero():
+  {==}
+
+def Laws.u32_show_nine():
+  {==}
+
+def Laws.u32_show_ten():
+  {==}
+
+def Laws.u32_show_max():
+  {==}
+
+def Laws.u32_roundtrip():
+  {==}

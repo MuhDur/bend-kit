@@ -3,7 +3,7 @@
 Packed byte buffers with affine ownership. Four octets occupy each U32 array word.
 
 ```bend
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 
 def show(r: Bytes.Bytes & U32) -> IO(Unit):
   (b, n) = r
@@ -18,11 +18,14 @@ def main() -> IO(Unit):
 | def | returns |
 |---|---|
 | `to_hex(b: Bytes) -> String` | Lowercase hexadecimal text. The call consumes the buffer. |
+| `clone(b: Bytes) -> Bytes & Bytes` | Two buffers with the same bytes. |
+| `u32.read(b: Bytes) -> Maybe<&2, U32>` | The value of ASCII decimal digits. `None` for an empty buffer, a non-digit, or a value above 4294967295. The call consumes the buffer. |
+| `u32.show(n: U32) -> Bytes` | `n` as ASCII decimal digits, with no leading zeros. |
 
 
 ## Positional reads and writes
 
-Import `bend-kit-bytes@0.3.2.0/bytes.bend`. `Cursor.new(bytes)` owns the
+Import `bend-kit-bytes@0.3.3.0/bytes.bend`. `Cursor.new(bytes)` owns the
 existing buffer at position zero. `Cursor.u8`, `Cursor.u16be`, `Cursor.u16le`,
 `Cursor.u32be`, `Cursor.u32le`, `Cursor.u64be`, and `Cursor.u64le` return `(cursor, Maybe(value))`.
 `None` means incomplete bytes, not an invalid protocol value. A failed read
