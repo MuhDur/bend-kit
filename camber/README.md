@@ -3,13 +3,13 @@
 `camber.bend` delivers fixed prepared applications, scoped hooks, once-only error mapping, strict typed inputs, validated packed responses, and public serving through published HTTP0.34.0.0. Package version: `0.10.0.0`; CI publishes after merge, never by hand. Entered-policy notifications run inline at explicit application-only or actual transport completion boundaries; optional redacted access logging uses published Notch0.3.0.0.
 
 ```bend
-import bend-kit-camber@0.13.0.0/camber.bend as Camber
-import bend-kit-camber@0.13.0.0/input.bend as Input
-import bend-kit-camber@0.13.0.0/notices.bend as Notices
-import bend-kit-http@0.36.0.0/http.bend as Http
+import bend-kit-camber@0.14.0.0/camber.bend as Camber
+import bend-kit-camber@0.14.0.0/input.bend as Input
+import bend-kit-camber@0.14.0.0/notices.bend as Notices
+import bend-kit-http@0.37.0.0/http.bend as Http
 ```
 
-`camber.bend` does not re-export `input.bend` or `notices.bend`. Import each file you call. `Http` values here are `bend-kit-http@0.36.0.0`, `bend-kit-router@0.2.0.0`, and `bend-kit-json@0.6.1.1`.
+`camber.bend` does not re-export `input.bend` or `notices.bend`. Import each file you call. `Http` values here are `bend-kit-http@0.37.0.0`, `bend-kit-router@0.2.0.0`, and `bend-kit-json@0.6.1.1`.
 
 
 ## API
@@ -93,7 +93,7 @@ Published HTTP0.30.0.0 is `0x8bc87dd4d1e610fe1bf336b567537a8c`; Wire0.4.5.0 is `
 
 `users.bend` is the reusable four-route consumer over published Camber0.10.0.0, HTTP0.34.0.0 and Json0.6.0.0. Its one affine Store owner holds the map and File; application configuration receives only the copied owner context. `users_direct.bend` and `users_live.bend` exercise that same public application and dispatcher separately. `users_demo.bend` adds a second loopback published-HTTP listener whose only administrative command is `POST /stop`. That listener trusts local processes, is not an authentication or supervisor boundary, and must never be proxied or exposed. It demonstrates cooperative application/store/control joins only; dedicated forced-exit supervision is exercised separately in [`deploy/README.md`](deploy/README.md).
 
-The `users*.bend` files are repository examples that consume published packages. They are not modules published at `bend-kit-camber@0.13.0.0/users.bend`; compile them from this checkout. Sibling imports now use the current named package versions.
+The `users*.bend` files are repository examples that consume published packages. They are not modules published at `bend-kit-camber@0.14.0.0/users.bend`; compile them from this checkout. Sibling imports now use the current named package versions.
 
 The demo uses `Bearer seven` for Alice/id7 and `Bearer eight` for Bob/id8. These fixed credentials are not an authentication product. The store is an in-memory map with an owned diagnostic File, not durable database storage. Default operation does not log requests, credentials, raw targets, query values, Host, or domain records. Trace and fault controls belong only to the separate acceptance consumers.
 
