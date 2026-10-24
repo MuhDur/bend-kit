@@ -2,19 +2,19 @@
 import Base
 import ../../time/time.bend as Time
 import ../commands.bend as C
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import bend-kit-sqlite@0.1.0.1/sqlite.bend as S
 
 def lcg(+x: U32) -> U32:
   (x * 1664525 + 1013904223 : U32)
 
 def num(b: Bytes.Bytes) -> U32:
-  Maybe.default(&2, U32, U32.read(Bytes.to_string(b)), 0)
+  Maybe.default(&2, U32, Bytes.u32.read(b), 0)
 
 # A running total: each payload is an amount, and the result is the new total.
 def decide(s: Bytes.Bytes, p: Bytes.Bytes) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   +t = (num(s) + num(p) : U32)
-  C.Accept{Bytes.from_string(U32.show(t)), Bytes.from_string(U32.show(t)), [Bytes.from_string("total=" ++ U32.show(t))]}
+  C.Accept{Bytes.u32.show(t), Bytes.u32.show(t), [Bytes.append(Bytes.from_string("total="), Bytes.u32.show(t))]}
 
 def lap(name: String, t0: Time.Duration, t1: Time.Duration, +c: U32) -> IO(Unit):
   IO.print(name ++ "\t" ++ Time.Duration.show_ms(Time.Duration.sub(t1, t0)) ++ "\t" ++ U32.show(c))
@@ -36,7 +36,7 @@ def run(n: Nat, +fresh: Bool, +st: C.Store, +i: U32, +x: U32, +h: U32) -> IO(U32
       IO.pure(U32, h)
     case 1n+p:
       do IO<U32>:
-        r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~decide, st, "cmd_" ++ U32.show(i), Bytes.from_string(U32.show(((x >> 1n) % 1000 : U32))), 200))
+        r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~decide, st, "cmd_" ++ U32.show(i), Bytes.u32.show(((x >> 1n) % 1000 : U32)), 200))
         +v : U32 <- result(fresh, r)
         run(p, fresh, st, (i + 1 : U32), lcg(x), (h * 31 + v : U32))
 

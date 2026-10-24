@@ -1,5 +1,5 @@
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import ./commands.bend as C
 import ./ledger.bend as L
 

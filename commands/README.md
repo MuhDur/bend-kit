@@ -3,10 +3,10 @@
 Retry-safe commands. Each command has an id and a payload. The first delivery of an id runs your `decide` and commits the new domain state, a record of the outcome, and the outbox effects in one SQLite transaction. A retry of the id with the same payload writes nothing and replays the recorded outcome. A retry with a different payload is a conflict.
 
 ```bend
-import bend-kit-commands@0.2.0.1/commands.bend as C
+import bend-kit-commands@0.3.0.0/commands.bend as C
 ```
 
-It imports `bend-kit-sqlite@0.1.0.1` and `bend-kit-bytes@0.3.2.0`. The store's database and statement handles are that sqlite version's `U32` ids. Payloads, states, results, and effects are that bytes version's `Bytes.Bytes`.
+It imports `bend-kit-sqlite@0.1.0.1` and `bend-kit-bytes@0.3.3.0`. The store's database and statement handles are that sqlite version's `U32` ids. Payloads, states, results, and effects are that bytes version's `Bytes.Bytes`.
 
 ```mermaid
 flowchart LR
@@ -29,15 +29,15 @@ A running total. Each payload is an amount in decimal, the result is the new tot
 
 ```bend
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-commands@0.2.0.1/commands.bend as C
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import bend-kit-commands@0.3.0.0/commands.bend as C
 
 def num(b: Bytes.Bytes) -> U32:
-  Maybe.default(&2, U32, U32.read(Bytes.to_string(b)), 0)
+  Maybe.default(&2, U32, Bytes.u32.read(b), 0)
 
 def decide(s: Bytes.Bytes, p: Bytes.Bytes) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
   +t = (num(s) + num(p) : U32)
-  C.Accept{Bytes.from_string(U32.show(t)), Bytes.from_string(U32.show(t)), [Bytes.from_string("total=" ++ U32.show(t))]}
+  C.Accept{Bytes.u32.show(t), Bytes.u32.show(t), [Bytes.append(Bytes.from_string("total="), Bytes.u32.show(t))]}
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -67,7 +67,7 @@ def main() -> IO(Unit):
 
 `Reply` is `Fresh{outcome}`, `Replayed{outcome}`, or `Conflict{}`. `Outcome` is `Accepted{result}` or `Refused{result}`. A refusal is recorded like an acceptance, so a retry gets the same answer even after the state changes.
 
-`step(~S, ~P, ~R, ~E, ~eq, ~dup_p, ~dup_r, ~decide, found, s, p, at)` is the pure processor that `handle` runs inside the transaction. Its types may be affine (`Type`). `dup_p` and `dup_r` copy a payload and a result, because a new command's payload goes to `decide` and to the record, and its result goes to the record and to the reply. It answers `Write{state, record, reply, effects}` for an acceptance, `Note{record, reply}` for a refusal, which `handle` commits, or `Keep{reply}`, which writes nothing. `handle` passes `same` (`Bytes.eq`) as `eq` and `dup` (`Array.clone`) as both copies. Use `step` with another store.
+`step(~S, ~P, ~R, ~E, ~eq, ~dup_p, ~dup_r, ~decide, found, s, p, at)` is the pure processor that `handle` runs inside the transaction. Its types may be affine (`Type`). `dup_p` and `dup_r` copy a payload and a result, because a new command's payload goes to `decide` and to the record, and its result goes to the record and to the reply. It answers `Write{state, record, reply, effects}` for an acceptance, `Note{record, reply}` for a refusal, which `handle` commits, or `Keep{reply}`, which writes nothing. `handle` passes `same` (`Bytes.eq`) as `eq` and `Bytes.clone` as both copies. Use `step` with another store.
 
 ### Tables
 
@@ -115,7 +115,7 @@ This is not exactly-once execution of external effects. A command's effects are 
 
 ## Trust boundary
 
-- **Payload comparison and copies.** The laws take `eq`, `dup_p`, and `dup_r` as given. `retry_replays` needs `eq(x, x)` and `dup(x) == (x, x)` for every `x`. The store uses `same`, which is `Bytes.eq`, and `dup`, which is `Array.clone`. Neither fact is proven.
+- **Payload comparison and copies.** The laws take `eq`, `dup_p`, and `dup_r` as given. `retry_replays` needs `eq(x, x)` and `dup(x) == (x, x)` for every `x`. The store uses `same`, which is `Bytes.eq`, and `Bytes.clone`. Neither fact is proven.
 - **The store.** The laws are about `step`. `handle` gives `step` the record that `commands_seen` holds for the id, commits `Write` with one `UPDATE` and two kinds of `INSERT`, and commits `Note` with one `INSERT`. That wiring, SQLite's atomicity, and `BEGIN IMMEDIATE`'s isolation are trust assumptions. `check.bend` tests them; it is not a proof.
 - **Durability.** A `COMMIT` is durable as SQLite's journal mode and `synchronous` setting make it. The defaults (rollback journal, `FULL`) sync before `COMMIT` returns.
 - **Concurrency.** Any number of processes may open one file. `BEGIN IMMEDIATE` takes the write lock before the lookup, so two deliveries of one id never both find no record. One `Store` serves one task at a time.
