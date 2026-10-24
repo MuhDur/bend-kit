@@ -3,7 +3,7 @@
 Retry-safe commands. Each command has an id and a payload. The first delivery of an id runs your `decide` and commits the new domain state, a record of the outcome, and the outbox effects in one SQLite transaction. A retry of the id with the same payload writes nothing and replays the recorded outcome. A retry with a different payload is a conflict.
 
 ```bend
-import bend-kit-commands@0.2.0.0/commands.bend as C
+import bend-kit-commands@0.2.0.1/commands.bend as C
 ```
 
 It imports `bend-kit-sqlite@0.1.0.1` and `bend-kit-bytes@0.3.2.0`. The store's database and statement handles are that sqlite version's `U32` ids. Payloads, states, results, and effects are that bytes version's `Bytes.Bytes`.
@@ -30,7 +30,7 @@ A running total. Each payload is an amount in decimal, the result is the new tot
 ```bend
 import Base
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-commands@0.2.0.0/commands.bend as C
+import bend-kit-commands@0.2.0.1/commands.bend as C
 
 def num(b: Bytes.Bytes) -> U32:
   Maybe.default(&2, U32, U32.read(Bytes.to_string(b)), 0)
