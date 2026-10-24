@@ -5,10 +5,10 @@ import ./ledger.bend as L
 
 # Writes inside a transaction, then dies before COMMIT.
 def crash(st: C.Store) -> IO(Unit):
-  C.Store{db, +begin, commit, rollback, find, read, +save, +keep, emit} = st
+  C.Store{db, +begin, commit, rollback, find, read, +save, +del, +keep, emit} = st
   do IO<Unit>:
     IO.try(Unit, C.exec(begin))
-    IO.try(Unit, C.state.put(save, Bytes.from_string("{\"a\":999}")))
+    IO.try(Unit, C.rows.put([C.Row{Bytes.from_string("a"), Some{Bytes.from_string("999")}}], save, del))
     IO.try(Unit, C.seen.put(C.Record{Bytes.from_string("{\"account\":\"a\",\"credit\":1}"), C.Accepted{Bytes.from_string("999")}, 200}, keep, "evt_4"))
     IO.die(Unit, 9, "crash before COMMIT")
 
@@ -26,14 +26,14 @@ def race(n: Nat, +st: C.Store, +i: U32, +k: U32) -> IO(Unit):
       IO.print("fresh=" ++ U32.show(k))
     case 1n+m:
       do IO<Unit>:
-        r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~L.decide, st, "race_" ++ U32.show(i), Bytes.from_string("{\"account\":\"race\",\"credit\":1}"), 200))
+        r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~L.keys, ~L.decide, st, "race_" ++ U32.show(i), Bytes.from_string("{\"account\":\"race\",\"credit\":1}"), 200))
         race(m, st, (i + 1 : U32), (k + fresh(r) : U32))
 
 def run(xs: List<String>) -> IO(Unit):
   match xs:
     case Con{prog, Con{+mode, Con{path, Nil{}}}}:
       do IO<Unit>:
-        +st : C.Store <- IO.try(C.Store, C.open(path, Bytes.from_string("{}"), 10000))
+        +st : C.Store <- IO.try(C.Store, C.open(path, 10000))
         Bool.pick(IO(Unit), String.eq(mode, "crash"), crash(st), race(400n, st, 0, 0))
     case _:
       IO.die(Unit, 2, "usage: child.bend <crash|race> <path>")

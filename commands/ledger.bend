@@ -2,56 +2,9 @@
 import Base
 import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import bend-kit-json@0.7.0.0/json.bend as Json
-import bend-kit-collections@0.1.3.0/omap.bend as O
 import ./commands.bend as C
 
-# ---- state: a JSON object of account balances, such as {"acct_1":500}
-
-def Books() -> Data:
-  O.OMap<String, U32>
-
-def books.put.n(n: Maybe<&2, U32>, m: Maybe<&2, Books()>, +k: String) -> Maybe<&2, Books()>:
-  match n m:
-    case Some{x} Some{b}:
-      Some{O.OMap.put(~String, ~U32, ~String.order, b, k, x)}
-    case _ _:
-      None{}
-
-def books.put(v: Json.Val, +k: String, m: Maybe<&2, Books()>) -> Maybe<&2, Books()>:
-  match v:
-    case Json.Num{b}:
-      books.put.n(Bytes.u32.read(b), m, k)
-    case _:
-      None{}
-
-def books.add(kvs: List<&1, Bytes.Bytes & Json.Val>, m: Maybe<&2, Books()>) -> Maybe<&2, Books()>:
-  match kvs:
-    case Nil{}:
-      m
-    case Con{kv, rest}:
-      (k, v) = kv
-      books.add(rest, books.put(v, Bytes.to_string(k), m))
-
-def books.of(mv: Maybe<&1, Json.Val>) -> Maybe<&2, Books()>:
-  match mv:
-    case Some{Json.Obj{kvs}}:
-      books.add(kvs, Some{O.OMap.new(String, U32)})
-    case _:
-      None{}
-
-def decode(s: Bytes.Bytes) -> Maybe<&2, Books()>:
-  books.of(Json.parse.strict.unique.bytes(s, 1))
-
-def encode.go(xs: List<&1, String & U32>) -> List<&1, Bytes.Bytes & Json.Val>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case Con{kv, rest}:
-      (k, n) = kv
-      Con{(Bytes.from_string(k), Json.Num{Bytes.u32.show(n)}), encode.go(rest)}
-
-def encode(m: Books()) -> Bytes.Bytes:
-  Json.encode.bytes(Json.Obj{encode.go(O.OMap.to_list(String, U32, m))})
+# ---- state: one row per account, the key the account name and the value its balance in decimal
 
 # ---- payload: {"account":"acct_1","credit":500} or {"account":"acct_1","debit":200}
 
@@ -109,45 +62,59 @@ def payload(p: Bytes.Bytes) -> Maybe<&2, Op>:
 
 # ---- decide
 
-def balance(m: Maybe<&2, U32>) -> U32:
-  match m:
-    case Some{x}:
-      x
+# The rows that a command reads: its account's row.
+def keys.of(o: Maybe<&2, Op>) -> List<Bytes.Bytes>:
+  match o:
+    case Some{Credit{a, n}}:
+      [Bytes.from_string(a)]
+    case Some{Debit{a, n}}:
+      [Bytes.from_string(a)]
     case None{}:
-      0
+      []
 
-def accepted(m: Books(), +a: String, +n: U32) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
-  C.Accept{encode(O.OMap.put(~String, ~U32, ~String.order, m, a, n)), Bytes.u32.show(n), [Bytes.from_string(a ++ "=" ++ U32.show(n))]}
+def keys(p: Bytes.Bytes) -> List<Bytes.Bytes>:
+  keys.of(payload(p))
 
-def settle(ok: Bool, m: Books(), +a: String, +n: U32, why: String) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
+# The balance in the account's row: 0 when no row holds it, None when the row does not decode.
+def balance(rs: List<C.Row>) -> Maybe<&2, U32>:
+  match rs:
+    case Con{C.Row{k, Some{v}}, rest}:
+      Bytes.u32.read(v)
+    case Con{C.Row{k, None{}}, rest}:
+      Some{0}
+    case Nil{}:
+      None{}
+
+def accepted(+a: String, +n: U32) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
+  C.Accept{[C.Row{Bytes.from_string(a), Some{Bytes.u32.show(n)}}], Bytes.u32.show(n), [Bytes.from_string(a ++ "=" ++ U32.show(n))]}
+
+def settle(ok: Bool, +a: String, +n: U32, why: String) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
   match ok:
     case True{}:
-      accepted(m, a, n)
+      accepted(a, n)
     case False{}:
       C.Refuse{Bytes.from_string(why)}
 
-def apply(o: Op, +m: Books()) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
+def apply(o: Op, +b: U32) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
   match o:
     case Credit{+a, +n}:
-      +b = balance(O.OMap.get(~String, ~U32, ~String.order, m, a))
       +t = (b + n : U32)
-      settle(U32.is_le(b, t), m, a, t, "balance overflow")
+      settle(U32.is_le(b, t), a, t, "balance overflow")
     case Debit{+a, +n}:
-      +b = balance(O.OMap.get(~String, ~U32, ~String.order, m, a))
-      settle(U32.is_le(n, b), m, a, (b - n : U32), "insufficient funds")
+      settle(U32.is_le(n, b), a, (b - n : U32), "insufficient funds")
 
-def decide.go(m: Maybe<&2, Books()>, o: Maybe<&2, Op>) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
-  match m o:
-    case Some{b} Some{x}:
-      apply(x, b)
+def decide.go(o: Maybe<&2, Op>, b: Maybe<&2, U32>) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
+  match o b:
+    case Some{x} Some{n}:
+      apply(x, n)
     case None{} _:
-      C.Refuse{Bytes.from_string("state does not decode")}
-    case Some{b} None{}:
       C.Refuse{Bytes.from_string("invalid payload")}
+    case Some{x} None{}:
+      C.Refuse{Bytes.from_string("balance does not decode")}
 
-# A credit or debit of one account. The result is the new balance; the effect notifies the account holder.
-def decide(s: Bytes.Bytes, p: Bytes.Bytes) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
-  decide.go(decode(s), payload(p))
+# A credit or debit of one account. rs holds the account's row. The result is the new balance; the effect notifies the account holder.
+def decide(rs: List<C.Row>, p: Bytes.Bytes) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
+  decide.go(payload(p), balance(rs))
 
 def outcome.show(o: C.Outcome<Bytes.Bytes>) -> String:
   match o:

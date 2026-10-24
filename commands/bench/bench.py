@@ -6,11 +6,10 @@ n = int(sys.argv[2]) if len(sys.argv) > 2 else 10000
 db = sqlite3.connect(path, isolation_level=None)
 print(f"sqlite\t{sqlite3.sqlite_version}")
 db.execute("PRAGMA busy_timeout = 10000")
-db.execute("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)")
+db.execute("CREATE TABLE IF NOT EXISTS commands_rows (k BLOB PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID")
 db.execute("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)")
 db.execute("CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)")
 db.execute("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)")
-db.execute("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))")
 
 
 def handle(cmd, payload):
@@ -20,8 +19,9 @@ def handle(cmd, payload):
     if row:
         db.execute("COMMIT")
         return (2 if row[0] == payload else 0), int(row[2])
-    total = (int(db.execute("SELECT state FROM commands_state WHERE k = 0").fetchone()[0]) + int(payload)) & 0xFFFFFFFF
-    db.execute("UPDATE commands_state SET state = ? WHERE k = 0", (str(total).encode(),))
+    prev = db.execute("SELECT v FROM commands_rows WHERE k = ?", (b"total",)).fetchone()
+    total = ((int(prev[0]) if prev else 0) + int(payload)) & 0xFFFFFFFF
+    db.execute("INSERT OR REPLACE INTO commands_rows (k, v) VALUES (?, ?)", (b"total", str(total).encode()))
     db.execute("INSERT INTO commands_seen (id, payload, kind, result, at) VALUES (?, ?, ?, ?, ?)", (cmd, payload, 1, str(total).encode(), 200))
     db.execute("INSERT INTO commands_outbox (id, effect) VALUES (?, ?)", (cmd, f"total={total}".encode()))
     db.execute("COMMIT")
@@ -43,7 +43,7 @@ def run(want):
 t0 = time.perf_counter()
 run(1)
 t1 = time.perf_counter()
-print(f"fresh\t{(t1 - t0) * 1e3:.3f}\t{int(db.execute('SELECT state FROM commands_state WHERE k = 0').fetchone()[0])}")
+print(f"fresh\t{(t1 - t0) * 1e3:.3f}\t{int(db.execute('SELECT v FROM commands_rows WHERE k = ?', (b'total',)).fetchone()[0])}")
 t0 = time.perf_counter()
 h = run(2)
 t1 = time.perf_counter()
