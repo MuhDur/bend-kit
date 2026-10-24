@@ -306,6 +306,20 @@ def written(
         exec(commit)
         return reply
 
+# A duplicate needs no state: step ignores s when found is Some, so it gets an empty one.
+def handle.found(
+  ~decide: Bytes.Bytes -> Bytes.Bytes -> Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>,
+  found: Maybe<Record<Bytes.Bytes, Bytes.Bytes>>, +read: U32, payload: Bytes.Bytes, at: U32,
+  +commit: U32, +save: U32, +keep: U32, +emit: U32, +id: String
+) -> Run(Reply<Bytes.Bytes>):
+  match found:
+    case None{}:
+      do Run<Reply<Bytes.Bytes>>:
+        s : Bytes.Bytes <- state.get(read)
+        written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~dup, ~dup, ~decide, None{}, s, payload, at), commit, save, keep, emit, id)
+    case Some{rec}:
+      written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~dup, ~dup, ~decide, Some{rec}, Bytes.new(0), payload, at), commit, save, keep, emit, id)
+
 def handle.txn(
   ~decide: Bytes.Bytes -> Bytes.Bytes -> Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>,
   st: Store, +id: String, payload: Bytes.Bytes, at: U32
@@ -314,8 +328,7 @@ def handle.txn(
   do Run<Reply<Bytes.Bytes>>:
     exec(begin)
     found : Maybe<Record<Bytes.Bytes, Bytes.Bytes>> <- seen.get(find, id)
-    s : Bytes.Bytes <- state.get(read)
-    written(step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~same, ~dup, ~dup, ~decide, found, s, payload, at), commit, save, keep, emit, id)
+    handle.found(~decide, found, read, payload, at, commit, save, keep, emit, id)
 
 # On failure, resets the read statements and rolls back. Rollback errors are ignored: the transaction may not have started.
 def handle.end(r: Result<&1, &1, U32 & String, Reply<Bytes.Bytes>>, st: Store) -> Run(Reply<Bytes.Bytes>):
