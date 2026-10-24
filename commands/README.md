@@ -1,12 +1,12 @@
 # commands
 
-Retry-safe commands. Each command has an id and a payload. The first delivery of an id runs your `decide` and commits the new domain state, a record of the outcome, and the outbox effects in one SQLite transaction. A retry of the id with the same payload writes nothing and replays the recorded outcome. A retry with a different payload is a conflict.
+Retry-safe commands. Each command has an id and a payload. The first delivery of an id reads the rows that the command names, runs your `decide`, and commits the rows it writes, a record of the outcome, and the outbox effects in one SQLite transaction. A retry of the id with the same payload writes nothing and replays the recorded outcome. A retry with a different payload is a conflict.
 
 ```bend
-import bend-kit-commands@0.3.0.0/commands.bend as C
+import bend-kit-commands@0.4.0.0/commands.bend as C
 ```
 
-It imports `bend-kit-sqlite@0.1.0.1` and `bend-kit-bytes@0.3.3.0`. The store's database and statement handles are that sqlite version's `U32` ids. Payloads, states, results, and effects are that bytes version's `Bytes.Bytes`.
+It imports `bend-kit-sqlite@0.1.0.1` and `bend-kit-bytes@0.3.3.0`. The store's database and statement handles are that sqlite version's `U32` ids. Payloads, row keys and values, results, and effects are that bytes version's `Bytes.Bytes`.
 
 ```mermaid
 flowchart LR
@@ -14,8 +14,9 @@ flowchart LR
   B --> F{record for id?}
   F -->|same payload| R[Replayed: recorded outcome]
   F -->|other payload| X[Conflict]
-  F -->|none| D[decide state, payload]
-  D -->|Accept| W[state + record + outbox]
+  F -->|none| K[read the rows keys names]
+  K --> D[decide rows, payload]
+  D -->|Accept| W[rows + record + outbox]
   D -->|Refuse| WR[Note: record only]
   W --> C[COMMIT]
   WR --> C
@@ -25,41 +26,51 @@ flowchart LR
 
 ## Example
 
-A running total. Each payload is an amount in decimal, the result is the new total, and each new command emits one effect.
+A running total in one row, key `total`. Each payload is an amount in decimal, the result is the new total, and each new command emits one effect.
 
 ```bend
 import Base
 import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
-import bend-kit-commands@0.3.0.0/commands.bend as C
+import bend-kit-commands@0.4.0.0/commands.bend as C
 
 def num(b: Bytes.Bytes) -> U32:
   Maybe.default(&2, U32, Bytes.u32.read(b), 0)
 
-def decide(s: Bytes.Bytes, p: Bytes.Bytes) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
-  +t = (num(s) + num(p) : U32)
-  C.Accept{Bytes.u32.show(t), Bytes.u32.show(t), [Bytes.append(Bytes.from_string("total="), Bytes.u32.show(t))]}
+def keys(p: Bytes.Bytes) -> List<Bytes.Bytes>:
+  [Bytes.from_string("total")]
+
+def total(rs: List<C.Row>) -> U32:
+  match rs:
+    case Con{C.Row{k, Some{v}}, rest}:
+      num(v)
+    case _:
+      0
+
+def decide(rs: List<C.Row>, p: Bytes.Bytes) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
+  +t = (total(rs) + num(p) : U32)
+  C.Accept{[C.Row{Bytes.from_string("total"), Some{Bytes.u32.show(t)}}], Bytes.u32.show(t), [Bytes.append(Bytes.from_string("total="), Bytes.u32.show(t))]}
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    +st : C.Store <- IO.try(C.Store, C.open("totals.db", Bytes.from_string("0"), 5000))
-    a : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~decide, st, "evt_1", Bytes.from_string("5"), 1760000000))
-    b : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~decide, st, "evt_1", Bytes.from_string("5"), 1760000060))
+    +st : C.Store <- IO.try(C.Store, C.open("totals.db", 5000))
+    a : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~keys, ~decide, st, "evt_1", Bytes.from_string("5"), 1760000000))
+    b : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~keys, ~decide, st, "evt_1", Bytes.from_string("5"), 1760000060))
     IO.try(Unit, C.close(st))
 ```
 
 `a` is `Fresh{Accepted{"5"}}` and `b` is `Replayed{Accepted{"5"}}`, with each result as bytes. The total stays 5.
 
-[ledger.bend](ledger.bend) is the full consumer: a payment ledger fed by webhook events. A payload is strict JSON bytes, such as the raw body of a webhook delivery: `{"account":"acct_1","credit":500}` or `{"account":"acct_1","debit":200}`. The state is a JSON object of balances, kept in a `bend-kit-collections` `OMap` while `decide` runs. A debit past the balance is refused, and each applied event emits `account=balance` to the outbox.
+[ledger.bend](ledger.bend) is the full consumer: a payment ledger fed by webhook events. A payload is strict JSON bytes, such as the raw body of a webhook delivery: `{"account":"acct_1","credit":500}` or `{"account":"acct_1","debit":200}`. Each account is one row: the key is the account name and the value is its balance in decimal. `keys` names the payload's account, so a command reads one row however many accounts the store holds. A debit past the balance is refused, and each applied event emits `account=balance` to the outbox.
 
 ## API
 
-`~decide: Bytes -> Bytes -> Decision<Bytes, Bytes, Bytes>` takes the committed state and the payload, where `Bytes` is `Bytes.Bytes`. It answers `Accept{state, result, effects}` or `Refuse{result}`. It is pure, so it cannot run an effect: put the effect in the outbox.
+`~keys: Bytes -> List<Bytes>` takes the payload and names the row keys that the command reads. `~decide: List<Row> -> Bytes -> Decision<List<Row>, Bytes, Bytes>` takes those rows and the payload, where `Bytes` is `Bytes.Bytes`. It gets one `Row{key, value}` for each key, in the order `keys` gave; `value` is `None` when no row holds the key. It answers `Accept{rows, result, effects}` or `Refuse{result}`. Each written row with `Some{v}` puts `v` at its key, and each with `None` deletes the key; a later row for a key wins. `decide` may write keys it did not read. It is pure, so it cannot run an effect: put the effect in the outbox.
 
 | def | does |
 |---|---|
-| `open(path, init, wait)` | Opens or creates the database and its tables. A new database starts with state `init`; an existing one keeps its state. A write waits up to `wait` ms for another connection's transaction, then fails with `SQLITE_BUSY` (5). |
-| `handle(~decide, st, id, payload, at)` | Runs one command in one `BEGIN IMMEDIATE` transaction. `at` is the record's time, in seconds, for `prune`. On a failure it rolls back and answers `Fail`; nothing was committed, so retry the call. |
-| `state(st)` | The committed domain state. |
+| `open(path, wait)` | Opens or creates the database and its tables. A write waits up to `wait` ms for another connection's transaction, then fails with `SQLITE_BUSY` (5). |
+| `handle(~keys, ~decide, st, id, payload, at)` | Runs one command in one `BEGIN IMMEDIATE` transaction. A duplicate or a conflict reads no rows. `at` is the record's time, in seconds, for `prune`. On a failure it rolls back and answers `Fail`; nothing was committed, so retry the call. |
+| `get(st, key)` | The committed value at `key`, or `None`. |
 | `outbox.next(st)` | The oldest undelivered effect as `Pending{seq, id, effect}`, or `None`. |
 | `outbox.ack(st, seq)` | Removes a delivered effect. |
 | `prune(st, before)` | Forgets every record whose `at` is below `before`. |
@@ -67,17 +78,17 @@ def main() -> IO(Unit):
 
 `Reply` is `Fresh{outcome}`, `Replayed{outcome}`, or `Conflict{}`. `Outcome` is `Accepted{result}` or `Refused{result}`. A refusal is recorded like an acceptance, so a retry gets the same answer even after the state changes.
 
-`step(~S, ~P, ~R, ~E, ~eq, ~dup_p, ~dup_r, ~decide, found, s, p, at)` is the pure processor that `handle` runs inside the transaction. Its types may be affine (`Type`). `dup_p` and `dup_r` copy a payload and a result, because a new command's payload goes to `decide` and to the record, and its result goes to the record and to the reply. It answers `Write{state, record, reply, effects}` for an acceptance, `Note{record, reply}` for a refusal, which `handle` commits, or `Keep{reply}`, which writes nothing. `handle` passes `same` (`Bytes.eq`) as `eq` and `Bytes.clone` as both copies. Use `step` with another store.
+`step(~S, ~P, ~R, ~E, ~eq, ~dup_p, ~dup_r, ~decide, found, s, p, at)` is the pure processor that `handle` runs inside the transaction, with `S = List<Row>`. Its types may be affine (`Type`). `dup_p` and `dup_r` copy a payload and a result, because a new command's payload goes to `decide` and to the record, and its result goes to the record and to the reply. It answers `Write{state, record, reply, effects}` for an acceptance, `Note{record, reply}` for a refusal, which `handle` commits, or `Keep{reply}`, which writes nothing. `handle` passes `same` (`Bytes.eq`) as `eq` and `Bytes.clone` as both copies. Use `step` with another store.
 
 ### Tables
 
 | table | row |
 |---|---|
-| `commands_state` | one row, `k = 0`: the domain state as a BLOB |
+| `commands_rows` | `k` (BLOB primary key), `v` (BLOB): the domain state, one row per key |
 | `commands_seen` | `id` (primary key), `payload` (BLOB), `kind` (1 accepted, 2 refused), `result` (BLOB), `at` |
 | `commands_outbox` | `seq` (autoincrement), `id`, `effect` (BLOB) |
 
-The id is text. A database made by 0.1 stores text where 0.2 reads BLOBs, so 0.2 fails on its rows with `SQLITE_MISMATCH` (20). Start 0.2 on a new file.
+The id is text. A database made by 0.1 stores text where 0.2 reads BLOBs, so 0.2 fails on its rows with `SQLITE_MISMATCH` (20). 0.4 keeps the state in `commands_rows` and does not read the `commands_state` row of 0.3. Start each of them on a new file.
 
 ## Payload identity
 
@@ -116,10 +127,10 @@ This is not exactly-once execution of external effects. A command's effects are 
 ## Trust boundary
 
 - **Payload comparison and copies.** The laws take `eq`, `dup_p`, and `dup_r` as given. `retry_replays` needs `eq(x, x)` and `dup(x) == (x, x)` for every `x`. The store uses `same`, which is `Bytes.eq`, and `Bytes.clone`. Neither fact is proven.
-- **The store.** The laws are about `step`. `handle` gives `step` the record that `commands_seen` holds for the id, commits `Write` with one `UPDATE` and two kinds of `INSERT`, and commits `Note` with one `INSERT`. That wiring, SQLite's atomicity, and `BEGIN IMMEDIATE`'s isolation are trust assumptions. `check.bend` tests them; it is not a proof.
+- **The store.** The laws are about `step`. `handle` gives `step` the record that `commands_seen` holds for the id and the rows that `keys` names, commits `Write` with one `INSERT OR REPLACE` or `DELETE` per row and two kinds of `INSERT`, and commits `Note` with one `INSERT`. That wiring, SQLite's atomicity, and `BEGIN IMMEDIATE`'s isolation are trust assumptions. `check.bend` tests them; it is not a proof.
 - **Durability.** A `COMMIT` is durable as SQLite's journal mode and `synchronous` setting make it. The defaults (rollback journal, `FULL`) sync before `COMMIT` returns.
 - **Concurrency.** Any number of processes may open one file. `BEGIN IMMEDIATE` takes the write lock before the lookup, so two deliveries of one id never both find no record. One `Store` serves one task at a time.
-- **Size.** The domain state is one BLOB row, read by every command and written by every accepted one. Keep it small, or keep large state in your own tables.
+- **Size.** A command reads the rows that `keys` names, with one indexed lookup each, and writes the rows that `decide` returns. The cost of a command grows with those rows, not with the table. Keep each value small: a row is read and written whole.
 
 ## Checks
 
@@ -128,11 +139,12 @@ This is not exactly-once execution of external effects. A command's effects are 
 - a new event applies, a duplicate replays its result, and an id reused with another payload is a conflict; neither changes the state;
 - an overdraft is refused, and a retry replays the refusal; payloads without an amount or with a repeated key are refused;
 - a payload with a NUL byte is recorded and replays, and a payload that differs only after the NUL byte is a conflict;
-- after close and reopen, a retry replays, and `init` is ignored;
-- a child process (`child.bend crash`) writes the state and a record inside a transaction and dies before `COMMIT`. After a restart, both are gone, and the event applies once;
+- after close and reopen, the rows are kept and a retry replays;
+- a child process (`child.bend crash`) writes a row and a record inside a transaction and dies before `COMMIT`. After a restart, both are gone, and the event applies once;
 - writer A is inside its transaction for an event and has found no record. Writer B delivers the same event: it waits, then fails with `SQLITE_BUSY` and commits nothing. A commits, and B's retry replays A's result;
 - two processes deliver the same 400 events at once; each applies once, and the outbox holds one effect for each;
 - the outbox delivers in commit order, and `ack` empties it;
-- `prune` forgets old records, so an old id applies again, while a newer id still replays.
+- `prune` forgets old records, so an old id applies again, while a newer id still replays;
+- among 100,000 seeded accounts, a credit applies to its account, a neighbor keeps its balance, and a duplicate replays.
 
 `bench/` times `handle` for new commands and duplicates. See [bench/README.md](bench/README.md).

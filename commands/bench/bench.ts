@@ -6,21 +6,21 @@ const n = Number(process.argv[3] ?? 10000);
 const db = new Database(path);
 console.log(`sqlite\t${db.query<{ v: string }, []>("SELECT sqlite_version() AS v").get()!.v}`);
 db.run("PRAGMA busy_timeout = 10000");
-db.run("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)");
+db.run("CREATE TABLE IF NOT EXISTS commands_rows (k BLOB PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID");
 db.run("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)");
 db.run("CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)");
 db.run("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)");
-db.run("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))");
 
 const begin = db.prepare("BEGIN IMMEDIATE");
 const commit = db.prepare("COMMIT");
 const find = db.prepare<{ payload: Uint8Array; result: Uint8Array }, [string]>("SELECT payload, kind, result, at FROM commands_seen WHERE id = ?");
-const read = db.prepare<{ state: Uint8Array }, []>("SELECT state FROM commands_state WHERE k = 0");
-const save = db.prepare<unknown, [Buffer]>("UPDATE commands_state SET state = ? WHERE k = 0");
+const read = db.prepare<{ v: Uint8Array }, [Buffer]>("SELECT v FROM commands_rows WHERE k = ?");
+const save = db.prepare<unknown, [Buffer, Buffer]>("INSERT OR REPLACE INTO commands_rows (k, v) VALUES (?, ?)");
 const keep = db.prepare<unknown, [string, Buffer, number, Buffer, number]>("INSERT INTO commands_seen (id, payload, kind, result, at) VALUES (?, ?, ?, ?, ?)");
 const emit = db.prepare<unknown, [string, Buffer]>("INSERT INTO commands_outbox (id, effect) VALUES (?, ?)");
 const dec = new TextDecoder();
 const num = (b: Uint8Array) => Number(dec.decode(b));
+const key = Buffer.from("total");
 
 // 1 for a new command, 2 for a duplicate, 0 for a conflict, with the recorded or new total.
 function handle(id: string, payload: Buffer): [number, number] {
@@ -30,9 +30,10 @@ function handle(id: string, payload: Buffer): [number, number] {
     commit.run();
     return [payload.equals(row.payload) ? 2 : 0, num(row.result)];
   }
-  const total = (num(read.get()!.state) + num(payload)) >>> 0;
+  const prev = read.get(key);
+  const total = ((prev ? num(prev.v) : 0) + num(payload)) >>> 0;
   const t = Buffer.from(String(total));
-  save.run(t);
+  save.run(key, t);
   keep.run(id, payload, 1, t, 200);
   emit.run(id, Buffer.from(`total=${total}`));
   commit.run();
@@ -55,7 +56,7 @@ function pass(want: number): number {
 let t0 = performance.now();
 pass(1);
 let t1 = performance.now();
-console.log(`fresh\t${(t1 - t0).toFixed(3)}\t${num(read.get()!.state)}`);
+console.log(`fresh\t${(t1 - t0).toFixed(3)}\t${num(read.get(key)!.v)}`);
 t0 = performance.now();
 const h = pass(2);
 t1 = performance.now();

@@ -67,14 +67,17 @@ static int handle(const char* id, const char* payload, uint32_t* result) {
   }
   ok(rc, SQLITE_DONE);
   ok(sqlite3_reset(find), SQLITE_OK);
-  ok(sqlite3_step(readst), SQLITE_ROW);
-  uint32_t total = num(readst, 0);
+  blob(readst, 1, "total");
+  rc = sqlite3_step(readst);
+  if (rc != SQLITE_ROW) ok(rc, SQLITE_DONE);
+  uint32_t total = rc == SQLITE_ROW ? num(readst, 0) : 0;
   ok(sqlite3_reset(readst), SQLITE_OK);
   total += (uint32_t)strtoul(payload, NULL, 10);
   char t[16], effect[32];
   snprintf(t, sizeof t, "%u", total);
   snprintf(effect, sizeof effect, "total=%u", total);
-  blob(save, 1, t);
+  blob(save, 1, "total");
+  blob(save, 2, t);
   run(save);
   text(keep, 1, id);
   blob(keep, 2, payload);
@@ -114,22 +117,22 @@ int main(int argc, char** argv) {
   ok(sqlite3_open(path, &db), SQLITE_OK);
   printf("sqlite\t%s\n", sqlite3_libversion());
   exec("PRAGMA busy_timeout = 10000");
-  exec("CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)");
+  exec("CREATE TABLE IF NOT EXISTS commands_rows (k BLOB PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID");
   exec("CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)");
   exec("CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)");
   exec("CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)");
-  exec("INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))");
   begin_  = prepare("BEGIN IMMEDIATE");
   commit_ = prepare("COMMIT");
   find    = prepare("SELECT payload, kind, result, at FROM commands_seen WHERE id = ?");
-  readst  = prepare("SELECT state FROM commands_state WHERE k = 0");
-  save    = prepare("UPDATE commands_state SET state = ? WHERE k = 0");
+  readst  = prepare("SELECT v FROM commands_rows WHERE k = ?");
+  save    = prepare("INSERT OR REPLACE INTO commands_rows (k, v) VALUES (?, ?)");
   keep    = prepare("INSERT INTO commands_seen (id, payload, kind, result, at) VALUES (?, ?, ?, ?, ?)");
   emit    = prepare("INSERT INTO commands_outbox (id, effect) VALUES (?, ?)");
 
   clock_gettime(CLOCK_MONOTONIC, &t0);
   pass(n, 1);
   clock_gettime(CLOCK_MONOTONIC, &t1);
+  blob(readst, 1, "total");
   ok(sqlite3_step(readst), SQLITE_ROW);
   printf("fresh\t%.3f\t%u\n", ms(t0, t1), num(readst, 0));
   ok(sqlite3_reset(readst), SQLITE_OK);

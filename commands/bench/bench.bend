@@ -11,10 +11,31 @@ def lcg(+x: U32) -> U32:
 def num(b: Bytes.Bytes) -> U32:
   Maybe.default(&2, U32, Bytes.u32.read(b), 0)
 
+def total() -> Bytes.Bytes:
+  Bytes.from_string("total")
+
+# Every command reads the one row "total".
+def keys(p: Bytes.Bytes) -> List<Bytes.Bytes>:
+  [total()]
+
+def sum(rs: List<C.Row>) -> U32:
+  match rs:
+    case Con{C.Row{k, Some{v}}, rest}:
+      num(v)
+    case _:
+      0
+
 # A running total: each payload is an amount, and the result is the new total.
-def decide(s: Bytes.Bytes, p: Bytes.Bytes) -> C.Decision<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes>:
-  +t = (num(s) + num(p) : U32)
-  C.Accept{Bytes.u32.show(t), Bytes.u32.show(t), [Bytes.append(Bytes.from_string("total="), Bytes.u32.show(t))]}
+def decide(rs: List<C.Row>, p: Bytes.Bytes) -> C.Decision<List<C.Row>, Bytes.Bytes, Bytes.Bytes>:
+  +t = (sum(rs) + num(p) : U32)
+  C.Accept{[C.Row{total(), Some{Bytes.u32.show(t)}}], Bytes.u32.show(t), [Bytes.append(Bytes.from_string("total="), Bytes.u32.show(t))]}
+
+def got(m: Maybe<Bytes.Bytes>) -> U32:
+  match m:
+    case Some{v}:
+      num(v)
+    case None{}:
+      0
 
 def lap(name: String, t0: Time.Duration, t1: Time.Duration, +c: U32) -> IO(Unit):
   IO.print(name ++ "\t" ++ Time.Duration.show_ms(Time.Duration.sub(t1, t0)) ++ "\t" ++ U32.show(c))
@@ -36,7 +57,7 @@ def run(n: Nat, +fresh: Bool, +st: C.Store, +i: U32, +x: U32, +h: U32) -> IO(U32
       IO.pure(U32, h)
     case 1n+p:
       do IO<U32>:
-        r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~decide, st, "cmd_" ++ U32.show(i), Bytes.u32.show(((x >> 1n) % 1000 : U32)), 200))
+        r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~keys, ~decide, st, "cmd_" ++ U32.show(i), Bytes.u32.show(((x >> 1n) % 1000 : U32)), 200))
         +v : U32 <- result(fresh, r)
         run(p, fresh, st, (i + 1 : U32), lcg(x), (h * 31 + v : U32))
 
@@ -60,8 +81,8 @@ def bench(+st: C.Store, +n: U32) -> IO(Unit):
     t0 : Time.Duration <- Time.mono()
     f : U32 <- run(U32.to_nat(n), True{}, st, 0, 1, 0)
     t1 : Time.Duration <- Time.mono()
-    total : Bytes.Bytes <- IO.try(Bytes.Bytes, C.state(st))
-    lap("fresh", t0, t1, num(total))
+    t : Maybe<Bytes.Bytes> <- IO.try(Maybe<Bytes.Bytes>, C.get(st, total()))
+    lap("fresh", t0, t1, got(t))
     t2 : Time.Duration <- Time.mono()
     +h : U32 <- run(U32.to_nat(n), False{}, st, 0, 1, 0)
     t3 : Time.Duration <- Time.mono()
@@ -82,7 +103,7 @@ def start(a: String & U32) -> IO(Unit):
   (path, +n) = a
   do IO<Unit>:
     version()
-    +st : C.Store <- IO.try(C.Store, C.open(path, Bytes.from_string("0"), 10000))
+    +st : C.Store <- IO.try(C.Store, C.open(path, 10000))
     bench(st, n)
 
 def main() -> IO(Unit):

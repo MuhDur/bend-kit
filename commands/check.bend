@@ -15,13 +15,21 @@ def same(+got: String, +want: String, msg: String) -> IO(Unit):
 
 def handled(+st: C.Store, id: String, p: String, at: U32, +want: String, msg: String) -> IO(Unit):
   do IO<Unit>:
-    r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~L.decide, st, id, Bytes.from_string(p), at))
+    r : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.handle(~L.keys, ~L.decide, st, id, Bytes.from_string(p), at))
     same(L.reply.show(r), want, msg)
 
-def holds(+st: C.Store, +want: String, msg: String) -> IO(Unit):
+def shown(m: Maybe<Bytes.Bytes>) -> String:
+  match m:
+    case Some{v}:
+      Bytes.to_string(v)
+    case None{}:
+      "none"
+
+# The committed value at key k, or "none".
+def holds(+st: C.Store, k: String, +want: String, msg: String) -> IO(Unit):
   do IO<Unit>:
-    s : Bytes.Bytes <- IO.try(Bytes.Bytes, C.state(st))
-    same(Bytes.to_string(s), want, msg)
+    v : Maybe<Bytes.Bytes> <- IO.try(Maybe<Bytes.Bytes>, C.get(st, Bytes.from_string(k)))
+    same(shown(v), want, msg)
 
 def status(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> U32:
   match r:
@@ -69,11 +77,11 @@ def rm() -> IO(Unit):
 
 def duplicates() -> IO(Unit):
   do IO<Unit>:
-    +st : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{}"), 10000))
+    +st : C.Store <- IO.try(C.Store, C.open(path(), 10000))
     handled(st, "evt_1", credit("a", "500"), 100, "fresh accepted 500", "a new event applies")
     handled(st, "evt_1", credit("a", "500"), 200, "replayed accepted 500", "a duplicate replays the recorded result")
     handled(st, "evt_1", credit("a", "900"), 200, "conflict", "an id reused with another payload is rejected")
-    holds(st, "{\"a\":500}", "a duplicate and a conflict keep the state")
+    holds(st, "a", "500", "a duplicate and a conflict keep the state")
     handled(st, "evt_2", debit("a", "800"), 200, "fresh refused insufficient funds", "an overdraft is refused")
     handled(st, "evt_2", debit("a", "800"), 200, "replayed refused insufficient funds", "a refusal replays")
     handled(st, "evt_3", debit("a", "200"), 200, "fresh accepted 300", "a debit applies")
@@ -82,13 +90,14 @@ def duplicates() -> IO(Unit):
     handled(st, "evt_nul", "{}" ++ nul() ++ "a", 200, "fresh refused invalid payload", "a payload with a NUL byte is recorded")
     handled(st, "evt_nul", "{}" ++ nul() ++ "a", 200, "replayed refused invalid payload", "a payload with a NUL byte deduplicates")
     handled(st, "evt_nul", "{}" ++ nul() ++ "b", 200, "conflict", "the bytes after a NUL byte count")
-    holds(st, "{\"a\":300}", "refusals keep the state")
+    holds(st, "a", "300", "refusals keep the state")
+    holds(st, "b", "none", "an account no command touched has no row")
     IO.try(Unit, C.close(st))
 
 def restart() -> IO(Unit):
   do IO<Unit>:
-    +st : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{\"ignored\":1}"), 10000))
-    holds(st, "{\"a\":300}", "reopening keeps the committed state and ignores init")
+    +st : C.Store <- IO.try(C.Store, C.open(path(), 10000))
+    holds(st, "a", "300", "reopening keeps the committed rows")
     handled(st, "evt_1", credit("a", "500"), 300, "replayed accepted 500", "a retry after a restart replays")
     IO.try(Unit, C.close(st))
 
@@ -96,8 +105,8 @@ def crash() -> IO(Unit):
   do IO<Unit>:
     c : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("bend", ["child.bend", "crash", path()], "", 65536, 120000)
     ok(U32.is_eq(status(c), 9), "the child dies before COMMIT")
-    +st : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{}"), 10000))
-    holds(st, "{\"a\":300}", "the uncommitted state is rolled back")
+    +st : C.Store <- IO.try(C.Store, C.open(path(), 10000))
+    holds(st, "a", "300", "the uncommitted row is rolled back")
     handled(st, "evt_4", credit("a", "1"), 200, "fresh accepted 301", "the uncommitted record is rolled back")
     IO.try(Unit, C.close(st))
 
@@ -110,23 +119,23 @@ def busy(r: Result<&1, &1, U32 & String, C.Reply<Bytes.Bytes>>) -> IO(Unit):
 
 # Writer a is inside its transaction for evt_5 and has found no record. Writer b delivers evt_5 too.
 def inflight.go(a: C.Store, +b: C.Store) -> IO(Unit):
-  C.Store{db, +begin, +commit, rollback, +find, +read, +save, +keep, +emit} = a
+  C.Store{db, +begin, +commit, rollback, +find, +read, +save, +del, +keep, +emit} = a
   do IO<Unit>:
     IO.try(Unit, C.exec(begin))
     found : Maybe<C.Record<Bytes.Bytes, Bytes.Bytes>> <- IO.try(Maybe<C.Record<Bytes.Bytes, Bytes.Bytes>>, C.seen.get(find, "evt_5"))
     ok(Maybe.is_none(&1, C.Record<Bytes.Bytes, Bytes.Bytes>, found), "evt_5 is new")
-    r : Result<&1, &1, U32 & String, C.Reply<Bytes.Bytes>> <- C.handle(~L.decide, b, "evt_5", Bytes.from_string(credit("a", "7")), 200)
+    r : Result<&1, &1, U32 & String, C.Reply<Bytes.Bytes>> <- C.handle(~L.keys, ~L.decide, b, "evt_5", Bytes.from_string(credit("a", "7")), 200)
     busy(r)
-    s : Bytes.Bytes <- IO.try(Bytes.Bytes, C.state.get(read))
-    step : C.Step<Bytes.Bytes, Bytes.Bytes, Bytes.Bytes, Bytes.Bytes> = C.step(~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~C.same, ~Bytes.clone, ~Bytes.clone, ~L.decide, None{}, s, Bytes.from_string(credit("a", "7")), 200)
-    w : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.written(step, commit, save, keep, emit, "evt_5"))
+    rs : List<C.Row> <- IO.try(List<C.Row>, C.rows.get([Bytes.from_string("a")], read))
+    step : C.Step<List<C.Row>, Bytes.Bytes, Bytes.Bytes, Bytes.Bytes> = C.step(~List<C.Row>, ~Bytes.Bytes, ~Bytes.Bytes, ~Bytes.Bytes, ~C.same, ~Bytes.clone, ~Bytes.clone, ~L.decide, None{}, rs, Bytes.from_string(credit("a", "7")), 200)
+    w : C.Reply<Bytes.Bytes> <- IO.try(C.Reply<Bytes.Bytes>, C.written(step, commit, save, del, keep, emit, "evt_5"))
     same(L.reply.show(w), "fresh accepted 308", "the first writer commits")
     handled(b, "evt_5", credit("a", "7"), 200, "replayed accepted 308", "the second writer's retry replays")
 
 def inflight() -> IO(Unit):
   do IO<Unit>:
-    +a : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{}"), 10000))
-    +b : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{}"), 100))
+    +a : C.Store <- IO.try(C.Store, C.open(path(), 10000))
+    +b : C.Store <- IO.try(C.Store, C.open(path(), 100))
     inflight.go(a, b)
     IO.try(Unit, C.close(a))
     IO.try(Unit, C.close(b))
@@ -156,17 +165,34 @@ def race() -> IO(Unit):
   do IO<Unit>:
     c : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/bin/sh", ["-c", race.cmd()], "", 65536, 240000)
     race.ran(c)
-    +st : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{}"), 10000))
-    holds(st, "{\"a\":308,\"race\":400}", "400 ids sent twice by two processes apply once each")
+    +st : C.Store <- IO.try(C.Store, C.open(path(), 10000))
+    holds(st, "a", "308", "the ledger keeps its balance")
+    holds(st, "race", "400", "400 ids sent twice by two processes apply once each")
     r : U32 & String <- drain(500n, st, 0, "")
     drained(st, r)
 
 def retention() -> IO(Unit):
   do IO<Unit>:
-    +st : C.Store <- IO.try(C.Store, C.open(path(), Bytes.from_string("{}"), 10000))
+    +st : C.Store <- IO.try(C.Store, C.open(path(), 10000))
     IO.try(Unit, C.prune(st, 150))
     handled(st, "evt_1", credit("a", "500"), 400, "fresh accepted 808", "a pruned id runs as a new command")
     handled(st, "evt_3", debit("a", "200"), 400, "replayed accepted 300", "a record inside the window still replays")
+    IO.try(Unit, C.close(st))
+
+# Adds 100,000 rows of 100 each, keyed acct_0 to acct_99999.
+def seed(st: C.Store) -> IO(Unit):
+  C.Store{+db, begin, commit, rollback, find, read, save, del, keep, emit} = st
+  IO.try(Unit, C.sql(db, "INSERT INTO commands_rows (k, v) WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 99999) SELECT CAST('acct_' || i AS BLOB), CAST('100' AS BLOB) FROM n"))
+
+# A credit reads and writes only its account's row, among 100,000.
+def many() -> IO(Unit):
+  do IO<Unit>:
+    +st : C.Store <- IO.try(C.Store, C.open(path(), 10000))
+    seed(st)
+    handled(st, "evt_many", credit("acct_77777", "5"), 400, "fresh accepted 105", "a credit applies among 100,000 accounts")
+    holds(st, "acct_77777", "105", "the credited account has its new balance")
+    holds(st, "acct_77776", "100", "a neighbor keeps its balance")
+    handled(st, "evt_many", credit("acct_77777", "5"), 400, "replayed accepted 105", "a duplicate among 100,000 accounts replays")
     IO.try(Unit, C.close(st))
 
 def main() -> IO(Unit):
@@ -178,5 +204,6 @@ def main() -> IO(Unit):
     inflight()
     race()
     retention()
+    many()
     rm()
     IO.print("commands check ok")

@@ -99,11 +99,14 @@ impl Conn {
         }
         ok(self.db, rc, DONE);
         ok(self.db, unsafe { sqlite3_reset(self.find) }, OK);
-        ok(self.db, unsafe { sqlite3_step(self.read) }, ROW);
-        let total: u32 = num(col(self.read, 0)).wrapping_add(payload.parse().unwrap());
+        self.blob(self.read, 1, b"total");
+        let rc = unsafe { sqlite3_step(self.read) };
+        let prev = if rc == ROW { num(col(self.read, 0)) } else { ok(self.db, rc, DONE); 0 };
+        let total: u32 = prev.wrapping_add(payload.parse().unwrap());
         ok(self.db, unsafe { sqlite3_reset(self.read) }, OK);
         let t = total.to_string();
-        self.blob(self.save, 1, t.as_bytes());
+        self.blob(self.save, 1, b"total");
+        self.blob(self.save, 2, t.as_bytes());
         self.run(self.save);
         self.text(self.keep, 1, id);
         self.blob(self.keep, 2, payload.as_bytes());
@@ -143,18 +146,17 @@ fn main() {
     }
     println!("sqlite\t{}", unsafe { CStr::from_ptr(sqlite3_libversion()) }.to_string_lossy());
     exec(db, c"PRAGMA busy_timeout = 10000");
-    exec(db, c"CREATE TABLE IF NOT EXISTS commands_state (k INTEGER PRIMARY KEY CHECK (k = 0), state BLOB NOT NULL)");
+    exec(db, c"CREATE TABLE IF NOT EXISTS commands_rows (k BLOB PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID");
     exec(db, c"CREATE TABLE IF NOT EXISTS commands_seen (id TEXT PRIMARY KEY, payload BLOB NOT NULL, kind INTEGER NOT NULL, result BLOB NOT NULL, at INTEGER NOT NULL)");
     exec(db, c"CREATE INDEX IF NOT EXISTS commands_seen_at ON commands_seen (at)");
     exec(db, c"CREATE TABLE IF NOT EXISTS commands_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL, effect BLOB NOT NULL)");
-    exec(db, c"INSERT OR IGNORE INTO commands_state (k, state) VALUES (0, CAST('0' AS BLOB))");
     let c = Conn {
         db,
         begin: prepare(db, c"BEGIN IMMEDIATE"),
         commit: prepare(db, c"COMMIT"),
         find: prepare(db, c"SELECT payload, kind, result, at FROM commands_seen WHERE id = ?"),
-        read: prepare(db, c"SELECT state FROM commands_state WHERE k = 0"),
-        save: prepare(db, c"UPDATE commands_state SET state = ? WHERE k = 0"),
+        read: prepare(db, c"SELECT v FROM commands_rows WHERE k = ?"),
+        save: prepare(db, c"INSERT OR REPLACE INTO commands_rows (k, v) VALUES (?, ?)"),
         keep: prepare(db, c"INSERT INTO commands_seen (id, payload, kind, result, at) VALUES (?, ?, ?, ?, ?)"),
         emit: prepare(db, c"INSERT INTO commands_outbox (id, effect) VALUES (?, ?)"),
     };
@@ -162,6 +164,7 @@ fn main() {
     let t0 = Instant::now();
     c.pass(n, 1);
     let fresh = t0.elapsed();
+    c.blob(c.read, 1, b"total");
     ok(db, unsafe { sqlite3_step(c.read) }, ROW);
     println!("fresh\t{:.3}\t{}", fresh.as_secs_f64() * 1e3, num(col(c.read, 0)));
     ok(db, unsafe { sqlite3_reset(c.read) }, OK);
