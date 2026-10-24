@@ -77,7 +77,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`encoding`](encoding) | `bend-kit-encoding@0.5.0.0/encoding.bend` | UTF-8 between `String` and `Bytes`. |
 | [`unicode`](unicode) | `bend-kit-unicode@0.1.0.0/unicode.bend` | Unicode 17.0 category, NFC/NFD, case folding, and grapheme clusters. |
 | [`regex`](regex) | `bend-kit-regex@0.7.0.0/regex.bend` | Linear-time RE2 matching, with capture groups. |
-| [`parse`](parse) | `bend-kit-parse@0.1.0.1/parse.bend` | Parser combinators over text. `parse/json.bend` is a JSON grammar on them, not the `json` package. |
+| [`parse`](parse) | `bend-kit-parse@0.2.0.0/parse.bend` | Parser combinators over text. `parse/json.bend` is a JSON grammar on them, not the `json` package. |
 | [`fmt`](fmt) | `bend-kit-fmt@0.1.0.0/fmt.bend` | A string builder, `{}` formatting, padding, and shortest `F32` text. |
 | [`int`](int) | `bend-kit-int@0.2.0.0/int.bend` | `U8`, `U16`, `U64`, `I32`, and `I64`. `U64` and `I64` are slow. |
 | [`hash`](hash) | `bend-kit-hash@0.2.0.0/hash.bend` | FNV-1a, xxHash, SipHash-1-3, CRC-32, and Adler-32. Not cryptographic. |
@@ -94,7 +94,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`protobuf`](protobuf) | `bend-kit-protobuf@0.1.0.0/protobuf.bend` | Pure bounded proto3 messages over `Bytes`, with typed `protoc` code generation. |
 | [`migrate`](migrate) | `bend-kit-migrate@0.2.0.0/migrate.bend` | Versioned subscription records over `Bytes`: validated JSON decode, proved migrations that keep their billing meaning, and a proved encode/decode round trip. |
 | [`tar`](tar) | `bend-kit-tar@0.2.0.0/tar.bend` | POSIX ustar and PAX archives over `Bytes`. |
-| [`archive`](archive) | `bend-kit-archive@0.3.0.0/archive.bend` | ZIP read: stored and DEFLATE entries, checked against CRC-32. |
+| [`archive`](archive) | `bend-kit-archive@0.4.0.0/archive.bend` | ZIP read: stored and DEFLATE entries, checked against CRC-32. |
 | [`zlib`](zlib) | `bend-kit-zlib@0.3.0.0/zlib.bend` | DEFLATE, gzip, and zlib, plus native gzip, zstd, and brotli. |
 | [`crdt`](crdt) | `bend-kit-crdt@0.1.0.0/crdt.bend` | A grow-only counter whose merge is proved commutative, associative, idempotent, and convergent. CBOR wire form. |
 
