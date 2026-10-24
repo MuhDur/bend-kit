@@ -2,6 +2,8 @@ import Base
 import bend-mathlib@0.7.2.0/nat.bend as MNat
 import bend-kit-scheduler@0.3.0.0/queue.bend as Q
 import bend-kit-collections@0.1.3.0/heap.bend as H
+import bend-kit-collections@0.1.3.0/LAWS.bend as CL
+import bend-kit-collections@0.1.3.0/PROOF.bend as CP
 import bend-kit-resources@0.1.0.0/resources.bend as Res
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import ./runner.bend as R
@@ -62,7 +64,7 @@ def Laws.failed_abandon(A, p, b, id, n, now, r):
   {==}
 
 def Laws.transient_abandon(A, a, p, b, id, n, now, r, e):
-  %Equal.sym(Retry.Plan, Retry.plan(Retry.Transient{a}, p, b, n, now, r), Retry.PlanStop{}, e) : {R.after.plan(A, _, Retry.Transient{a}, b, id, now) == R.Abandon{id, R.gave(b)} : R.Op<A>}
+  %Equal.sym(Retry.Plan, Retry.plan(Retry.Transient{a}, p, b, n, now, r), Retry.PlanStop{}, e) : {R.after.plan(A, _, Retry.Transient{a}, b, id, now) == R.Abandon{id, R.gave(b), now} : R.Op<A>}
   {==}
 
 # ---- pool
@@ -161,25 +163,22 @@ def absent.list(-A: Data, xs: List<&2, Q.Ticket<A>>, +i: Nat) -> Data:
     case Con{t, rest}:
       Both<{Nat.is_eq(Q.id(A, t), i) == False{} : Bool}, absent.list(A, rest, i)>
 
-def absent.dead(-A: Data, +i: Nat, ds: List<&2, R.Dead<A>>) -> Data:
-  match ds:
-    case Nil{}:
-      Unit
-    case Con{d, rest}:
-      Both<{Nat.is_eq(R.dead.id(A, d), i) == False{} : Bool}, absent.dead(A, i, rest)>
+# Ticket i is not dead in ds, and ds is a well-formed trie.
+def absent.dead(~A: Data, +i: Nat, ds: R.Graves(A)) -> Data:
+  Both<{R.dead.get(~A, ds, i) == None{} : Maybe<&2, R.Dead<A>>}, {Laws.dead.wf(~A, ds) == True{} : Bool}>
 
-def anything(-A: Data, ds: List<&2, R.Dead<A>>) -> Data:
+def anything(-A: Data, ds: R.Graves(A)) -> Data:
   Unit
 
 # s will issue no id i again, ticket i is neither pending nor running, and P holds of the dead tickets.
-def inv(-A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, s: R.State<A>) -> Data:
+def inv(-A: Data, +i: Nat, -P: R.Graves(A) -> Data, s: R.State<A>) -> Data:
   match s:
     case R.State{Q.State{n, h, r}, ts, ds, bs}:
       Both<MNat.lt(i, n), Both<absent.heap(A, h, i), Both<absent.list(A, r, i), P(ds)>>>
 
 # Ticket i is in no registry of s, and s will issue no id i again.
-def gone(-A: Data, +i: Nat, s: R.State<A>) -> Data:
-  inv(A, i, absent.dead(A, i), s)
+def gone(~A: Data, +i: Nat, s: R.State<A>) -> Data:
+  inv(A, i, ds => absent.dead(~A, i, ds), s)
 
 def lt_ne(i: Nat, n: Nat, e: MNat.lt(i, n)) -> {Nat.is_eq(n, i) == False{} : Bool}:
   match i n:
@@ -322,7 +321,7 @@ def take_absent(-A: Data, +xs: List<&2, Q.Ticket<A>>, +i: Nat) -> taken.rem_ok(A
     case Con{t, rest}:
       keep_absent(A, Nat.is_eq(Q.id(A, t), i), t, Q.take.list(A, rest, i), i, f => f, take_absent(A, rest, i))
 
-def complete_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, tk: Q.Taken<A>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, ts: R.Tries(), ds: List<&2, R.Dead<A>>, bs: R.Breakers(),
+def complete_inv(~A: Data, +i: Nat, -P: R.Graves(A) -> Data, tk: Q.Taken<A>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(),
     lt: MNat.lt(i, n), eh: absent.heap(A, h, i), erem: taken.rem_ok(A, tk, i), ed: P(ds)) ->
     inv(A, i, P, R.step.completed(A, Q.complete.taken(A, tk, n, h), ts, ds, bs)):
   match tk:
@@ -334,14 +333,14 @@ def found.of(-A: Data, tk: Q.Taken<A>) -> Maybe<&2, Q.Ticket<A>>:
     case Q.Taken{rest, found}:
       found
 
-def abandon_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, tk: Q.Taken<A>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, ts: R.Tries(), ds: List<&2, R.Dead<A>>, bs: R.Breakers(), w: R.Why,
-    lt: MNat.lt(i, n), eh: absent.heap(A, h, i), erem: taken.rem_ok(A, tk, i), ed: P(R.dead.bury(A, found.of(A, tk), ds, w))) ->
-    inv(A, i, P, R.step.abandoned(A, Q.complete.taken(A, tk, n, h), ts, ds, bs, w)):
+def abandon_inv(~A: Data, +i: Nat, -P: R.Graves(A) -> Data, tk: Q.Taken<A>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(), w: R.Why, +at: Nat,
+    lt: MNat.lt(i, n), eh: absent.heap(A, h, i), erem: taken.rem_ok(A, tk, i), ed: P(R.dead.bury(~A, found.of(A, tk), ds, w, at))) ->
+    inv(A, i, P, R.step.abandoned(~A, Q.complete.taken(A, tk, n, h), ts, ds, bs, w, at)):
   match tk:
     case Q.Taken{rest, found}:
       Both{lt, Both{eh, Both{erem, ed}}}
 
-def requeue_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, tk: Q.Taken<A>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, +d: Nat, ts: R.Tries(), ds: List<&2, R.Dead<A>>, bs: R.Breakers(),
+def requeue_inv(~A: Data, +i: Nat, -P: R.Graves(A) -> Data, tk: Q.Taken<A>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, +d: Nat, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(),
     lt: MNat.lt(i, n), eh: absent.heap(A, h, i), etk: taken.ok(A, tk, i), ed: P(ds)) ->
     inv(A, i, P, R.step.requeued(A, Q.requeue.completed(~A, Q.complete.taken(A, tk, n, h), d), ts, ds, bs)):
   match tk:
@@ -352,7 +351,7 @@ def requeue_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, tk: Q.Taken<
       Both{erest, ej} = etk
       Both{lt, Both{merge_all.full(~A, absent.ticket(A, i), H.HNode{1n, Q.Ticket{j, d, x}, H.HLeaf{}, H.HLeaf{}}, h, Both{ej, Both{Unit{}, Unit{}}}, eh), Both{erest, ed}}}
 
-def select_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, +now: Nat, +n: Nat, h: H.Heap<Q.Ticket<A>>, r: List<&2, Q.Ticket<A>>, ts: R.Tries(), ds: List<&2, R.Dead<A>>, bs: R.Breakers(),
+def select_inv(~A: Data, +i: Nat, -P: R.Graves(A) -> Data, +now: Nat, +n: Nat, h: H.Heap<Q.Ticket<A>>, r: List<&2, Q.Ticket<A>>, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(),
     +lt: MNat.lt(i, n), +eh: absent.heap(A, h, i), +er: absent.list(A, r, i), +ed: P(ds)) ->
     inv(A, i, P, R.step.selected(A, Q.select(~A, now, Q.State{n, h, r}), ts, ds, bs)):
   match h:
@@ -364,131 +363,146 @@ def select_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, +now: Nat, +n
         e => Both{lt, Both{merge_all.full(~A, absent.ticket(A, i), l, q, el, eq), Both{Both{et, er}, ed}}},
         e => Both{lt, Both{Both{et, Both{el, eq}}, Both{er, ed}}})
 
-def revive_inv(~A: Data, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, m: Maybe<&2, Q.Ticket<A>>, +n: Nat, +h: H.Heap<Q.Ticket<A>>, r: List<&2, Q.Ticket<A>>, ts: R.Tries(),
-    rest: List<&2, R.Dead<A>>, bs: R.Breakers(), +d: Nat, lt: MNat.lt(i, n), eh: absent.heap(A, h, i), er: absent.list(A, r, i), em: found.absent(A, m, i), ed: P(rest)) ->
-    inv(A, i, P, R.step.revived(~A, m, n, h, r, ts, rest, bs, d)):
+# A Revive of j that finds a dead ticket pushes ticket j; it must not be i.
+def revive.ok(-A: Data, m: Maybe<&2, R.Dead<A>>, +j: Nat, +i: Nat) -> Data:
+  match m:
+    case None{}:
+      Unit
+    case Some{x}:
+      {Nat.is_eq(j, i) == False{} : Bool}
+
+def revive_inv(~A: Data, +i: Nat, -P: R.Graves(A) -> Data, m: Maybe<&2, R.Dead<A>>, +j: Nat, +n: Nat, +h: H.Heap<Q.Ticket<A>>, r: List<&2, Q.Ticket<A>>, ts: R.Tries(),
+    rest: R.Graves(A), bs: R.Breakers(), +d: Nat, lt: MNat.lt(i, n), eh: absent.heap(A, h, i), er: absent.list(A, r, i), em: revive.ok(A, m, j, i), ed: P(rest)) ->
+    inv(A, i, P, R.step.revived(~A, m, j, n, h, r, ts, rest, bs, d)):
   match m:
     case None{}:
       Both{lt, Both{eh, Both{er, ed}}}
-    case Some{Q.Ticket{k, old, x}}:
-      Both{lt, Both{merge_all.full(~A, absent.ticket(A, i), H.HNode{1n, Q.Ticket{k, d, x}, H.HLeaf{}, H.HLeaf{}}, h, Both{em, Both{Unit{}, Unit{}}}, eh), Both{er, ed}}}
+    case Some{R.Dead{Q.Ticket{k, old, x}, w, at}}:
+      Both{lt, Both{merge_all.full(~A, absent.ticket(A, i), H.HNode{1n, Q.Ticket{j, d, x}, H.HLeaf{}, H.HLeaf{}}, h, Both{em, Both{Unit{}, Unit{}}}, eh), Both{er, ed}}}
 
 # ---- dead tickets
 
-def remove_keeps.dead(-A: Data, +ds: List<&2, R.Dead<A>>, +j: Nat, +i: Nat, +e: absent.dead(A, i, ds)) -> absent.dead(A, i, R.dead.remove(A, ds, j)):
-  match ds:
+def P.gone(~A: Data, +i: Nat) -> (R.Graves(A) -> Data):
+  ds => absent.dead(~A, i, ds)
+
+def is_eq_of(+a: Nat, -b: Nat, e: {a == b : Nat}) -> {Nat.is_eq(a, b) == True{} : Bool}:
+  %e : {Nat.is_eq(a, _) == True{} : Bool}
+  MNat.is_eq_refl(a)
+
+def ne_of(+a: Nat, +b: Nat, f: {Nat.is_eq(a, b) == False{} : Bool}) -> {a != b : Nat}:
+  e => MNat.internal_false_ne_true(Equal.trans(Bool, False{}, Nat.is_eq(a, b), True{}, Equal.sym(Bool, Nat.is_eq(a, b), False{}, f), is_eq_of(a, b, e)))
+
+def get_drop_same(~A: Data, +ds: R.Graves(A), +j: Nat, +i: Nat, e: {Nat.is_eq(j, i) == True{} : Bool}, wf: {Laws.dead.wf(~A, ds) == True{} : Bool}) ->
+    {R.dead.get(~A, R.dead.drop(~A, ds, j), i) == None{} : Maybe<&2, R.Dead<A>>}:
+  %Equal.sym(Nat, j, i, MNat.eq_of_is_eq(j, i, e)) : {R.dead.get(~A, R.dead.drop(~A, ds, _), i) == None{} : Maybe<&2, R.Dead<A>>}
+  CL.hmap_get_del_same(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ~MNat.eq_of_is_eq, ds, wf, i)
+
+def get_drop_other(~A: Data, +ds: R.Graves(A), +j: Nat, +i: Nat, f: {Nat.is_eq(j, i) == False{} : Bool}, eg: {R.dead.get(~A, ds, i) == None{} : Maybe<&2, R.Dead<A>>}) ->
+    {R.dead.get(~A, R.dead.drop(~A, ds, j), i) == None{} : Maybe<&2, R.Dead<A>>}:
+  Equal.trans(Maybe<&2, R.Dead<A>>, R.dead.get(~A, R.dead.drop(~A, ds, j), i), R.dead.get(~A, ds, i), None{},
+    CL.hmap_get_del_other_key(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ~MNat.eq_of_is_eq, ds, j, i, ne_of(j, i, f)), eg)
+
+# Dropping any ticket keeps ticket i not dead and the trie well formed.
+def drop_keeps(~A: Data, +ds: R.Graves(A), +j: Nat, +i: Nat, g: absent.dead(~A, i, ds)) -> absent.dead(~A, i, R.dead.drop(~A, ds, j)):
+  Both{+eg, +wf} = g
+  Both{split(b => {R.dead.get(~A, R.dead.drop(~A, ds, j), i) == None{} : Maybe<&2, R.Dead<A>>}, Nat.is_eq(j, i),
+      e => get_drop_same(~A, ds, j, i, e, wf),
+      f => get_drop_other(~A, ds, j, i, f, eg)),
+    CL.hmap_del_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ds, wf, j)}
+
+# Dropping ticket i leaves it not dead.
+def drop_self(~A: Data, +ds: R.Graves(A), +i: Nat, +wf: {Laws.dead.wf(~A, ds) == True{} : Bool}) -> absent.dead(~A, i, R.dead.drop(~A, ds, i)):
+  Both{CL.hmap_get_del_same(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ~MNat.eq_of_is_eq, ds, wf, i),
+    CL.hmap_del_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ds, wf, i)}
+
+def drops_keeps(~A: Data, ks: List<&2, Nat>, +ds: R.Graves(A), +i: Nat, g: absent.dead(~A, i, ds)) -> absent.dead(~A, i, R.dead.drops(~A, ks, ds)):
+  match ks:
     case Nil{}:
-      Unit{}
-    case Con{d, rest}:
-      Both{ed, er} = e
-      +r2 = R.dead.remove(A, rest, j)
-      +er2 = remove_keeps.dead(A, rest, j, i, er)
-      split(c => absent.dead(A, i, R.dead.remove.keep(A, c, d, r2)), Nat.is_eq(R.dead.id(A, d), j),
-        f => er2,
-        f => Both{ed, er2})
+      g
+    case Con{+k, rest}:
+      drops_keeps(~A, rest, R.dead.drop(~A, ds, k), i, drop_keeps(~A, ds, k, i, g))
 
-def remove_absent.dead(-A: Data, +ds: List<&2, R.Dead<A>>, +i: Nat) -> absent.dead(A, i, R.dead.remove(A, ds, i)):
-  match ds:
-    case Nil{}:
-      Unit{}
-    case Con{d, rest}:
-      +r2 = R.dead.remove(A, rest, i)
-      +er = remove_absent.dead(A, rest, i)
-      split(c => absent.dead(A, i, R.dead.remove.keep(A, c, d, r2)), Nat.is_eq(R.dead.id(A, d), i),
-        e => er,
-        e => Both{e, er})
+def purge_keeps(~A: Data, +ds: R.Graves(A), +t: Nat, +i: Nat, g: absent.dead(~A, i, ds)) -> absent.dead(~A, i, R.dead.purge(~A, ds, t)):
+  drops_keeps(~A, R.dead.old(A, R.dead.list(A, ds), t), ds, i, g)
 
-def find_choose_absent(-A: Data, b: Bool, d: R.Dead<A>, m: Maybe<&2, Q.Ticket<A>>, +i: Nat, e: {Nat.is_eq(R.dead.id(A, d), i) == False{} : Bool}, em: found.absent(A, m, i)) ->
-    found.absent(A, R.dead.find.choose(A, b, d, m), i):
-  match b d:
-    case True{} R.Dead{t, w}:
-      e
-    case False{} x:
-      em
-
-# A dead list without ticket i finds no ticket i.
-def find_absent(-A: Data, +ds: List<&2, R.Dead<A>>, +j: Nat, +i: Nat, e: absent.dead(A, i, ds)) -> found.absent(A, R.dead.find(A, ds, j), i):
-  match ds:
-    case Nil{}:
-      Unit{}
-    case Con{d, rest}:
-      Both{ed, er} = e
-      find_choose_absent(A, Nat.is_eq(R.dead.id(A, d), j), d, R.dead.find(A, rest, j), i, ed, find_absent(A, rest, j, i, er))
-
-def eq_ne(a: Nat, j: Nat, i: Nat, e1: {Nat.is_eq(a, j) == True{} : Bool}, e2: {Nat.is_eq(j, i) == False{} : Bool}) -> {Nat.is_eq(a, i) == False{} : Bool}:
-  match a j i:
-    case 0n 0n 0n:
-      e2
-    case 0n 0n 1n+k:
-      {==}
-    case 0n 1n+m c:
-      Empty.absurd({Nat.is_eq(0n, c) == False{} : Bool}, MNat.internal_false_ne_true(e1))
-    case 1n+p 0n c:
-      Empty.absurd({Nat.is_eq(1n+p, c) == False{} : Bool}, MNat.internal_false_ne_true(e1))
-    case 1n+p 1n+m 0n:
-      {==}
-    case 1n+p 1n+m 1n+k:
-      eq_ne(p, m, k, e1, e2)
-
-# Finding ticket j, when j is not i, finds no ticket i.
-def find_other(-A: Data, +ds: List<&2, R.Dead<A>>, +j: Nat, +i: Nat, +ne: {Nat.is_eq(j, i) == False{} : Bool}) -> found.absent(A, R.dead.find(A, ds, j), i):
-  match ds:
-    case Nil{}:
-      Unit{}
-    case Con{R.Dead{Q.Ticket{+k, dd, x}, w}, rest}:
-      +em = find_other(A, rest, j, i, ne)
-      split(c => found.absent(A, R.dead.find.choose(A, c, R.Dead{Q.Ticket{k, dd, x}, w}, R.dead.find(A, rest, j)), i), Nat.is_eq(k, j),
-        f => eq_ne(k, j, i, f, ne),
-        f => em)
-
-def bury_found(-A: Data, m: Maybe<&2, Q.Ticket<A>>, ds: List<&2, R.Dead<A>>, w: R.Why, +i: Nat, ef: found.absent(A, m, i), ed: absent.dead(A, i, ds)) ->
-    absent.dead(A, i, R.dead.bury(A, m, ds, w)):
+# Burying a ticket other than i keeps ticket i not dead.
+def bury_keeps(~A: Data, m: Maybe<&2, Q.Ticket<A>>, +ds: R.Graves(A), +w: R.Why, +at: Nat, +i: Nat, ef: found.absent(A, m, i), g: absent.dead(~A, i, ds)) ->
+    absent.dead(~A, i, R.dead.bury(~A, m, ds, w, at)):
   match m:
     case None{}:
-      ed
-    case Some{t}:
-      Both{ef, ed}
+      g
+    case Some{Q.Ticket{+k, +d, +x}}:
+      Both{+eg, +wf} = g
+      Both{Equal.trans(Maybe<&2, R.Dead<A>>, R.dead.get(~A, R.dead.bury(~A, Some{Q.Ticket{k, d, x}}, ds, w, at), i), R.dead.get(~A, ds, i), None{},
+          CL.hmap_get_put_other_key(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ~MNat.eq_of_is_eq, ds, wf, k, i, ne_of(k, i, ef), R.Dead{Q.Ticket{k, d, x}, w, at}), eg),
+        CL.hmap_put_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ~MNat.is_eq_refl, ~MNat.eq_of_is_eq, ds, wf, k, R.Dead{Q.Ticket{k, d, x}, w, at})}
 
-def bury_absent(-A: Data, tk: Q.Taken<A>, ds: List<&2, R.Dead<A>>, w: R.Why, +i: Nat, etk: taken.ok(A, tk, i), ed: absent.dead(A, i, ds)) ->
-    absent.dead(A, i, R.dead.bury(A, found.of(A, tk), ds, w)):
+def bury_absent(~A: Data, tk: Q.Taken<A>, +ds: R.Graves(A), +w: R.Why, +at: Nat, +i: Nat, etk: taken.ok(A, tk, i), g: absent.dead(~A, i, ds)) ->
+    absent.dead(~A, i, R.dead.bury(~A, found.of(A, tk), ds, w, at)):
   match tk:
     case Q.Taken{rest, found}:
       Both{erest, ef} = etk
-      bury_found(A, found, ds, w, i, ef, ed)
+      bury_keeps(~A, found, ds, w, at, i, ef, g)
+
+def any_ok(-A: Data, m: Maybe<&2, R.Dead<A>>, +j: Nat, +i: Nat, f: {Nat.is_eq(j, i) == False{} : Bool}) -> revive.ok(A, m, j, i):
+  match m:
+    case None{}:
+      Unit{}
+    case Some{x}:
+      f
+
+def same_ok(~A: Data, +ds: R.Graves(A), +j: Nat, +i: Nat, e: {Nat.is_eq(j, i) == True{} : Bool}, eg: {R.dead.get(~A, ds, i) == None{} : Maybe<&2, R.Dead<A>>}) ->
+    revive.ok(A, R.dead.get(~A, ds, j), j, i):
+  %Equal.sym(Nat, j, i, MNat.eq_of_is_eq(j, i, e)) : revive.ok(A, R.dead.get(~A, ds, _), j, i)
+  %Equal.sym(Maybe<&2, R.Dead<A>>, R.dead.get(~A, ds, i), None{}, eg) : revive.ok(A, _, j, i)
+  Unit{}
+
+# A Revive of j, when ticket i is not dead, pushes no ticket i.
+def revive_ok(~A: Data, +ds: R.Graves(A), +j: Nat, +i: Nat, +eg: {R.dead.get(~A, ds, i) == None{} : Maybe<&2, R.Dead<A>>}) -> revive.ok(A, R.dead.get(~A, ds, j), j, i):
+  split(b => revive.ok(A, R.dead.get(~A, ds, j), j, i), Nat.is_eq(j, i),
+    e => same_ok(~A, ds, j, i, e, eg),
+    f => any_ok(A, R.dead.get(~A, ds, j), j, i, f))
 
 # ---- every op keeps a gone ticket gone
 
-def step_gone(~A: Data, +i: Nat, s: R.State<A>, op: R.Op<A>, g: gone(A, i, s)) -> gone(A, i, R.step(~A, s, op)):
+def step_gone(~A: Data, +i: Nat, s: R.State<A>, op: R.Op<A>, g: gone(~A, i, s)) -> gone(~A, i, R.step(~A, s, op)):
   match s op:
     case R.State{Q.State{+n, h, r}, ts, ds, bs} R.Enqueue{d, x}:
       Both{+lt, Both{eh, Both{er, ed}}} = g
       Both{MNat.lt_trans(i, n, 1n+n, lt, MNat.lt_succ_self(n)), Both{merge_all.full(~A, absent.ticket(A, i), H.HNode{1n, Q.Ticket{n, d, x}, H.HLeaf{}, H.HLeaf{}}, h, Both{lt_ne(i, n, lt), Both{Unit{}, Unit{}}}, eh), Both{er, ed}}}
     case R.State{Q.State{n, h, r}, ts, ds, bs} R.Select{now}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      select_inv(~A, i, absent.dead(A, i), now, n, h, r, ts, ds, bs, lt, eh, er, ed)
+      select_inv(~A, i, P.gone(~A, i), now, n, h, r, ts, ds, bs, lt, eh, er, ed)
     case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Complete{+j}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      complete_inv(~A, i, absent.dead(A, i), Q.take.list(A, r, j), n, h, R.tries.drop(ts, j), ds, bs, lt, eh, ok_rem(A, Q.take.list(A, r, j), i, take_ok(A, r, j, i, er)), ed)
+      complete_inv(~A, i, P.gone(~A, i), Q.take.list(A, r, j), n, h, R.tries.drop(ts, j), ds, bs, lt, eh, ok_rem(A, Q.take.list(A, r, j), i, take_ok(A, r, j, i, er)), ed)
     case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Cancel{+j}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      Both{lt, Both{remove_all(~A, absent.ticket(A, i), h, j, eh), Both{remove_keeps.list(A, r, j, i, er), remove_keeps.dead(A, ds, j, i, ed)}}}
+      Both{lt, Both{remove_all(~A, absent.ticket(A, i), h, j, eh), Both{remove_keeps.list(A, r, j, i, er), drop_keeps(~A, ds, j, i, ed)}}}
     case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Requeue{+j, d}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      requeue_inv(~A, i, absent.dead(A, i), Q.take.list(A, r, j), n, h, d, R.tries.bump(ts, j), ds, bs, lt, eh, take_ok(A, r, j, i, er), ed)
+      requeue_inv(~A, i, P.gone(~A, i), Q.take.list(A, r, j), n, h, d, R.tries.bump(ts, j), ds, bs, lt, eh, take_ok(A, r, j, i, er), ed)
     case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Defer{+j, d}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      requeue_inv(~A, i, absent.dead(A, i), Q.take.list(A, r, j), n, h, d, ts, ds, bs, lt, eh, take_ok(A, r, j, i, er), ed)
-    case R.State{Q.State{n, h, +r}, ts, +ds, bs} R.Abandon{+j, +w}:
+      requeue_inv(~A, i, P.gone(~A, i), Q.take.list(A, r, j), n, h, d, ts, ds, bs, lt, eh, take_ok(A, r, j, i, er), ed)
+    case R.State{Q.State{n, h, +r}, ts, +ds, bs} R.Abandon{+j, +w, +at}:
       Both{lt, Both{eh, Both{+er, ed}}} = g
-      abandon_inv(~A, i, absent.dead(A, i), Q.take.list(A, r, j), n, h, R.tries.drop(ts, j), ds, bs, w, lt, eh, ok_rem(A, Q.take.list(A, r, j), i, take_ok(A, r, j, i, er)),
-        bury_absent(A, Q.take.list(A, r, j), ds, w, i, take_ok(A, r, j, i, er), ed))
+      abandon_inv(~A, i, P.gone(~A, i), Q.take.list(A, r, j), n, h, R.tries.drop(ts, j), ds, bs, w, at, lt, eh, ok_rem(A, Q.take.list(A, r, j), i, take_ok(A, r, j, i, er)),
+        bury_absent(~A, Q.take.list(A, r, j), ds, w, at, i, take_ok(A, r, j, i, er), ed))
     case R.State{Q.State{n, h, r}, ts, +ds, bs} R.Revive{+j, d}:
-      Both{lt, Both{eh, Both{er, +ed}}} = g
-      revive_inv(~A, i, absent.dead(A, i), R.dead.find(A, ds, j), n, h, r, ts, R.dead.remove(A, ds, j), bs, d, lt, eh, er, find_absent(A, ds, j, i, ed), remove_keeps.dead(A, ds, j, i, ed))
+      Both{lt, Both{eh, Both{er, ed}}} = g
+      Both{+eg, +wf} = ed
+      revive_inv(~A, i, P.gone(~A, i), R.dead.get(~A, ds, j), j, n, h, r, ts, R.dead.drop(~A, ds, j), bs, d, lt, eh, er, revive_ok(~A, ds, j, i, eg), drop_keeps(~A, ds, j, i, Both{eg, wf}))
+    case R.State{Q.State{n, h, r}, ts, +ds, bs} R.Purge{+t}:
+      Both{lt, Both{eh, Both{er, ed}}} = g
+      Both{lt, Both{eh, Both{er, purge_keeps(~A, ds, t, i, ed)}}}
+    case R.State{Q.State{n, h, r}, ts, ds, bs} R.PurgeAll{}:
+      Both{lt, Both{eh, Both{er, ed}}} = g
+      Both{lt, Both{eh, Both{er, Both{{==}, {==}}}}}
     case R.State{Q.State{n, h, r}, ts, ds, bs} R.Break{k, b}:
       g
 
-def live_gone(~A: Data, +i: Nat, ops: List<&2, R.Op<A>>, +s: R.State<A>, g: gone(A, i, s)) -> gone(A, i, Laws.live(~A, ops, s)):
+def live_gone(~A: Data, +i: Nat, ops: List<&2, R.Op<A>>, +s: R.State<A>, g: gone(~A, i, s)) -> gone(~A, i, Laws.live(~A, ops, s)):
   match ops:
     case Nil{}:
       g
@@ -518,12 +532,18 @@ def step_buried(~A: Data, +i: Nat, s: R.State<A>, op: R.Op<A>, g: inv(A, i, anyt
     case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Defer{+j, d}:
       Both{lt, Both{eh, Both{er, ed}}} = g
       requeue_inv(~A, i, anything(A), Q.take.list(A, r, j), n, h, d, ts, ds, bs, lt, eh, take_ok(A, r, j, i, er), Unit{})
-    case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Abandon{+j, w}:
+    case R.State{Q.State{n, h, +r}, ts, ds, bs} R.Abandon{+j, w, at}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      abandon_inv(~A, i, anything(A), Q.take.list(A, r, j), n, h, R.tries.drop(ts, j), ds, bs, w, lt, eh, ok_rem(A, Q.take.list(A, r, j), i, take_ok(A, r, j, i, er)), Unit{})
+      abandon_inv(~A, i, anything(A), Q.take.list(A, r, j), n, h, R.tries.drop(ts, j), ds, bs, w, at, lt, eh, ok_rem(A, Q.take.list(A, r, j), i, take_ok(A, r, j, i, er)), Unit{})
     case R.State{Q.State{n, h, r}, ts, +ds, bs} R.Revive{+j, d}:
       Both{lt, Both{eh, Both{er, ed}}} = g
-      revive_inv(~A, i, anything(A), R.dead.find(A, ds, j), n, h, r, ts, R.dead.remove(A, ds, j), bs, d, lt, eh, er, find_other(A, ds, j, i, no), Unit{})
+      revive_inv(~A, i, anything(A), R.dead.get(~A, ds, j), j, n, h, r, ts, R.dead.drop(~A, ds, j), bs, d, lt, eh, er, any_ok(A, R.dead.get(~A, ds, j), j, i, no), Unit{})
+    case R.State{Q.State{n, h, r}, ts, ds, bs} R.Purge{t}:
+      Both{lt, Both{eh, Both{er, ed}}} = g
+      Both{lt, Both{eh, Both{er, Unit{}}}}
+    case R.State{Q.State{n, h, r}, ts, ds, bs} R.PurgeAll{}:
+      Both{lt, Both{eh, Both{er, ed}}} = g
+      Both{lt, Both{eh, Both{er, Unit{}}}}
     case R.State{Q.State{n, h, r}, ts, ds, bs} R.Break{k, b}:
       g
 
@@ -560,29 +580,23 @@ def absent_of_has(-A: Data, h: H.Heap<Q.Ticket<A>>, +i: Nat, +e: {Laws.has(A, h,
       Both{or_false_left(Nat.is_eq(Q.id(A, t), i), Bool.or(Laws.has(A, l, i), Laws.has(A, r, i)), e),
         Both{absent_of_has(A, l, i, or_false_left(Laws.has(A, l, i), Laws.has(A, r, i), rest)), absent_of_has(A, r, i, or_false_right(Laws.has(A, l, i), Laws.has(A, r, i), rest))}}
 
-def absent_of_has.dead(-A: Data, ds: List<&2, R.Dead<A>>, +i: Nat, +e: {Laws.has.dead(A, ds, i) == False{} : Bool}) -> absent.dead(A, i, ds):
-  match ds:
-    case Nil{}:
-      Unit{}
-    case Con{+d, +rest}:
-      Both{or_false_left(Nat.is_eq(R.dead.id(A, d), i), Laws.has.dead(A, rest, i), e), absent_of_has.dead(A, rest, i, or_false_right(Nat.is_eq(R.dead.id(A, d), i), Laws.has.dead(A, rest, i), e))}
-
 def finish_gone(~A: Data, +i: Nat, s: R.State<A>, fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s))), idle: {Laws.has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool},
-    alive: {Laws.has.dead(A, R.dead(A, s), i) == False{} : Bool}) -> gone(A, i, R.step(~A, s, R.Complete{i})):
-  match s:
-    case R.State{Q.State{n, +h, +r}, ts, +ds, bs}:
-      complete_inv(~A, i, absent.dead(A, i), Q.take.list(A, r, i), n, h, R.tries.drop(ts, i), ds, bs, fresh, absent_of_has(A, h, i, idle), take_absent(A, r, i), absent_of_has.dead(A, ds, i, alive))
-
-def cancel_gone(~A: Data, +i: Nat, s: R.State<A>, fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))) -> gone(A, i, R.step(~A, s, R.Cancel{i})):
-  match s:
-    case R.State{Q.State{n, +h, +r}, ts, +ds, bs}:
-      Both{fresh, Both{remove_absent.heap(~A, h, i), Both{remove_absent.list(A, r, i), remove_absent.dead(A, ds, i)}}}
-
-def abandon_buried(~A: Data, +i: Nat, s: R.State<A>, w: R.Why, fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s))), idle: {Laws.has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}) ->
-    inv(A, i, anything(A), R.step(~A, s, R.Abandon{i, w})):
+    alive: {R.dead.get(~A, R.dead(A, s), i) == None{} : Maybe<&2, R.Dead<A>>}, wf: {Laws.dead.wf(~A, R.dead(A, s)) == True{} : Bool}) -> gone(~A, i, R.step(~A, s, R.Complete{i})):
   match s:
     case R.State{Q.State{n, +h, +r}, ts, ds, bs}:
-      abandon_inv(~A, i, anything(A), Q.take.list(A, r, i), n, h, R.tries.drop(ts, i), ds, bs, w, fresh, absent_of_has(A, h, i, idle), take_absent(A, r, i), Unit{})
+      complete_inv(~A, i, P.gone(~A, i), Q.take.list(A, r, i), n, h, R.tries.drop(ts, i), ds, bs, fresh, absent_of_has(A, h, i, idle), take_absent(A, r, i), Both{alive, wf})
+
+def cancel_gone(~A: Data, +i: Nat, s: R.State<A>, fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s))), wf: {Laws.dead.wf(~A, R.dead(A, s)) == True{} : Bool}) ->
+    gone(~A, i, R.step(~A, s, R.Cancel{i})):
+  match s:
+    case R.State{Q.State{n, +h, +r}, ts, +ds, bs}:
+      Both{fresh, Both{remove_absent.heap(~A, h, i), Both{remove_absent.list(A, r, i), drop_self(~A, ds, i, wf)}}}
+
+def abandon_buried(~A: Data, +i: Nat, s: R.State<A>, w: R.Why, +at: Nat, fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s))), idle: {Laws.has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}) ->
+    inv(A, i, anything(A), R.step(~A, s, R.Abandon{i, w, at})):
+  match s:
+    case R.State{Q.State{n, +h, +r}, ts, ds, bs}:
+      abandon_inv(~A, i, anything(A), Q.take.list(A, r, i), n, h, R.tries.drop(ts, i), ds, bs, w, at, fresh, absent_of_has(A, h, i, idle), take_absent(A, r, i), Unit{})
 
 def selected_absent(-A: Data, +i: Nat, m: Maybe<&2, Q.Ticket<A>>) -> Data:
   match m:
@@ -602,7 +616,7 @@ def select_selected_absent(~A: Data, now: Nat, +i: Nat, +q: Q.State<A>, eh: abse
         e => Unit{})
 
 # A Select from a state where i is neither pending nor running never takes i.
-def never(~A: Data, now: Nat, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, s: R.State<A>, g: inv(A, i, P, s), t: Q.Ticket<A>, e: {Laws.next(~A, now, s) == Some{t} : Maybe<&2, Q.Ticket<A>>}) ->
+def never(~A: Data, now: Nat, +i: Nat, -P: R.Graves(A) -> Data, s: R.State<A>, g: inv(A, i, P, s), t: Q.Ticket<A>, e: {Laws.next(~A, now, s) == Some{t} : Maybe<&2, Q.Ticket<A>>}) ->
     {Nat.is_eq(Q.id(A, t), i) == False{} : Bool}:
   match s:
     case R.State{Q.State{n, h, r}, ts, ds, bs}:
@@ -610,21 +624,22 @@ def never(~A: Data, now: Nat, +i: Nat, -P: List<&2, R.Dead<A>> -> Data, s: R.Sta
       %e : selected_absent(A, i, _)
       select_selected_absent(~A, now, i, Q.State{n, h, r}, eh)
 
-def Laws.complete_never_selected(A, i, s, fresh, idle, alive, ops, now, t, e):
+def Laws.complete_never_selected(A, i, s, fresh, idle, alive, wf, ops, now, t, e):
   +s = s
   +ops = ops
-  never(~A, now, i, absent.dead(A, i), Laws.live(~A, ops, R.step(~A, s, R.Complete{i})), live_gone(~A, i, ops, R.step(~A, s, R.Complete{i}), finish_gone(~A, i, s, fresh, idle, alive)), t, e)
+  never(~A, now, i, P.gone(~A, i), Laws.live(~A, ops, R.step(~A, s, R.Complete{i})), live_gone(~A, i, ops, R.step(~A, s, R.Complete{i}), finish_gone(~A, i, s, fresh, idle, alive, wf)), t, e)
 
-def Laws.cancel_never_selected(A, i, s, fresh, ops, now, t, e):
+def Laws.cancel_never_selected(A, i, s, fresh, wf, ops, now, t, e):
   +s = s
   +ops = ops
-  never(~A, now, i, absent.dead(A, i), Laws.live(~A, ops, R.step(~A, s, R.Cancel{i})), live_gone(~A, i, ops, R.step(~A, s, R.Cancel{i}), cancel_gone(~A, i, s, fresh)), t, e)
+  never(~A, now, i, P.gone(~A, i), Laws.live(~A, ops, R.step(~A, s, R.Cancel{i})), live_gone(~A, i, ops, R.step(~A, s, R.Cancel{i}), cancel_gone(~A, i, s, fresh, wf)), t, e)
 
-def Laws.dead_never_selected(A, i, s, fresh, idle, w, ops, kept, now, t, e):
+def Laws.dead_never_selected(A, i, s, fresh, idle, w, at, ops, kept, now, t, e):
   +s = s
   +w = w
+  +at = at
   +ops = ops
-  never(~A, now, i, anything(A), Laws.live(~A, ops, R.step(~A, s, R.Abandon{i, w})), live_buried(~A, i, ops, R.step(~A, s, R.Abandon{i, w}), abandon_buried(~A, i, s, w, fresh, idle), kept), t, e)
+  never(~A, now, i, anything(A), Laws.live(~A, ops, R.step(~A, s, R.Abandon{i, w, at})), live_buried(~A, i, ops, R.step(~A, s, R.Abandon{i, w, at}), abandon_buried(~A, i, s, w, at, fresh, idle), kept), t, e)
 
 def unsome(-T: Data, d: T, m: Maybe<&2, T>) -> T:
   match m:
@@ -637,14 +652,95 @@ def some_inj(-T: Data, +a: T, b: T, e: {Some{a} == Some{b} : Maybe<&2, T>}) -> {
   %e : {a == unsome(T, a, _) : T}
   {==}
 
-def moved(-A: Data, +i: Nat, x: R.State<A>, y: R.State<A>, q: {x == y : R.State<A>}, g: gone(A, i, x)) -> gone(A, i, y):
-  %q : gone(A, i, _)
+def moved(~A: Data, +i: Nat, x: R.State<A>, y: R.State<A>, q: {x == y : R.State<A>}, g: gone(~A, i, x)) -> gone(~A, i, y):
+  %q : gone(~A, i, _)
   g
 
-def Laws.recovered_never_selected(A, X, enc, dec, round, i, s, fresh, idle, alive, ops, r, back, now, t, e):
+def Laws.recovered_never_selected(A, X, enc, dec, round, i, s, fresh, idle, alive, wf, ops, r, back, now, t, e):
   +r = r
   +s1 = R.step(~A, s, R.Complete{i})
   +q = some_inj(R.State<A>, Laws.live(~A, ops, s1), r,
     Equal.trans(Maybe<&2, R.State<A>>, Some{Laws.live(~A, ops, s1)}, Laws.replayed(~A, ~X, ~enc, ~dec, ops, s1), Some{r},
       Equal.sym(Maybe<&2, R.State<A>>, Laws.replayed(~A, ~X, ~enc, ~dec, ops, s1), Some{Laws.live(~A, ops, s1)}, replay.go(~A, ~X, ~enc, ~dec, ~round, ops, s1)), back))
-  never(~A, now, i, absent.dead(A, i), r, moved(A, i, Laws.live(~A, ops, s1), r, q, live_gone(~A, i, ops, s1, finish_gone(~A, i, s, fresh, idle, alive))), t, e)
+  never(~A, now, i, P.gone(~A, i), r, moved(~A, i, Laws.live(~A, ops, s1), r, q, live_gone(~A, i, ops, s1, finish_gone(~A, i, s, fresh, idle, alive, wf))), t, e)
+
+# ---- every op keeps the dead-ticket trie well formed
+
+def WF(~A: Data, ds: R.Graves(A)) -> Data:
+  {Laws.dead.wf(~A, ds) == True{} : Bool}
+
+def wf.enqueued(~A: Data, r: Q.State<A> & Nat, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(), d: Nat, wf: WF(~A, ds)) -> WF(~A, R.dead(A, R.step.enqueued(A, r, ts, ds, bs, d))):
+  match r:
+    case (q, i):
+      wf
+
+def wf.selected(~A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(), wf: WF(~A, ds)) -> WF(~A, R.dead(A, R.step.selected(A, r, ts, ds, bs))):
+  match r:
+    case (q, t):
+      wf
+
+def wf.requeued(~A: Data, r: Q.State<A> & Bool, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(), wf: WF(~A, ds)) -> WF(~A, R.dead(A, R.step.requeued(A, r, ts, ds, bs))):
+  match r:
+    case (q, b):
+      wf
+
+def wf.completed(~A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: R.Tries(), ds: R.Graves(A), bs: R.Breakers(), wf: WF(~A, ds)) -> WF(~A, R.dead(A, R.step.completed(A, r, ts, ds, bs))):
+  match r:
+    case (q, t):
+      wf
+
+def bury_wf(~A: Data, m: Maybe<&2, Q.Ticket<A>>, +ds: R.Graves(A), +w: R.Why, +at: Nat, +wf: WF(~A, ds)) -> WF(~A, R.dead.bury(~A, m, ds, w, at)):
+  match m:
+    case None{}:
+      wf
+    case Some{Q.Ticket{+k, +d, +x}}:
+      CL.hmap_put_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ~MNat.is_eq_refl, ~MNat.eq_of_is_eq, ds, wf, k, R.Dead{Q.Ticket{k, d, x}, w, at})
+
+def wf.abandoned(~A: Data, r: Q.State<A> & Maybe<&2, Q.Ticket<A>>, ts: R.Tries(), +ds: R.Graves(A), bs: R.Breakers(), +w: R.Why, +at: Nat, +wf: WF(~A, ds)) ->
+    WF(~A, R.dead(A, R.step.abandoned(~A, r, ts, ds, bs, w, at))):
+  match r:
+    case (q, t):
+      bury_wf(~A, t, ds, w, at, wf)
+
+def wf.revived(~A: Data, m: Maybe<&2, R.Dead<A>>, +j: Nat, n: Nat, h: H.Heap<Q.Ticket<A>>, r: List<&2, Q.Ticket<A>>, ts: R.Tries(), rest: R.Graves(A), bs: R.Breakers(), +d: Nat,
+    wf: WF(~A, rest)) -> WF(~A, R.dead(A, R.step.revived(~A, m, j, n, h, r, ts, rest, bs, d))):
+  match m:
+    case None{}:
+      wf
+    case Some{R.Dead{Q.Ticket{k, old, x}, w, at}}:
+      wf
+
+def drops_wf(~A: Data, ks: List<&2, Nat>, +ds: R.Graves(A), +wf: WF(~A, ds)) -> WF(~A, R.dead.drops(~A, ks, ds)):
+  match ks:
+    case Nil{}:
+      wf
+    case Con{+k, rest}:
+      drops_wf(~A, rest, R.dead.drop(~A, ds, k), CL.hmap_del_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ds, wf, k))
+
+def step_wf(~A: Data, s: R.State<A>, op: R.Op<A>, wf: WF(~A, R.dead(A, s))) -> WF(~A, R.dead(A, R.step(~A, s, op))):
+  match s op:
+    case R.State{q, ts, ds, bs} R.Enqueue{+d, x}:
+      wf.enqueued(~A, Q.enqueue(~A, d, x, q), ts, ds, bs, d, wf)
+    case R.State{q, ts, ds, bs} R.Select{now}:
+      wf.selected(~A, Q.select(~A, now, q), ts, ds, bs, wf)
+    case R.State{q, ts, ds, bs} R.Complete{+i}:
+      wf.completed(~A, Q.complete(A, i, q), R.tries.drop(ts, i), ds, bs, wf)
+    case R.State{q, ts, ds, bs} R.Cancel{+i}:
+      CL.hmap_del_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ds, wf, i)
+    case R.State{q, ts, ds, bs} R.Requeue{+i, d}:
+      wf.requeued(~A, Q.requeue(~A, i, d, q), R.tries.bump(ts, i), ds, bs, wf)
+    case R.State{q, ts, ds, bs} R.Defer{i, d}:
+      wf.requeued(~A, Q.requeue(~A, i, d, q), ts, ds, bs, wf)
+    case R.State{q, ts, ds, bs} R.Abandon{+i, w, at}:
+      wf.abandoned(~A, Q.complete(A, i, q), R.tries.drop(ts, i), ds, bs, w, at, wf)
+    case R.State{Q.State{n, h, r}, ts, +ds, bs} R.Revive{+i, d}:
+      wf.revived(~A, R.dead.get(~A, ds, i), i, n, h, r, ts, R.dead.drop(~A, ds, i), bs, d, CL.hmap_del_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ds, wf, i))
+    case R.State{q, ts, +ds, bs} R.Purge{t}:
+      drops_wf(~A, R.dead.old(A, R.dead.list(A, ds), t), ds, wf)
+    case R.State{q, ts, ds, bs} R.PurgeAll{}:
+      {==}
+    case R.State{q, ts, ds, bs} R.Break{k, b}:
+      wf
+
+def Laws.dead_wf(A, s, wf, op):
+  step_wf(~A, s, op, wf)

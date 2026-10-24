@@ -2,6 +2,7 @@ import Base
 import bend-mathlib@0.7.2.0/nat.bend as MNat
 import bend-kit-scheduler@0.3.0.0/queue.bend as Q
 import bend-kit-collections@0.1.3.0/heap.bend as H
+import bend-kit-collections@0.1.3.0/LAWS.bend as CL
 import bend-kit-resources@0.1.0.0/resources.bend as Res
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
 import ./runner.bend as R
@@ -110,13 +111,9 @@ def has(-A: Data, h: H.Heap<Q.Ticket<A>>, +i: Nat) -> Bool:
     case H.HNode{n, t, l, r}:
       Bool.or(Nat.is_eq(Q.id(A, t), i), Bool.or(has(A, l, i), has(A, r, i)))
 
-# Whether a dead ticket with id i is in ds.
-def has.dead(-A: Data, ds: List<&2, R.Dead<A>>, +i: Nat) -> Bool:
-  match ds:
-    case Nil{}:
-      False{}
-    case Con{d, rest}:
-      Bool.or(Nat.is_eq(R.dead.id(A, d), i), has.dead(A, rest, i))
+# The dead-ticket trie is well formed, as collections defines it: R.new's is, and dead_wf shows that every op keeps it so.
+def dead.wf(~A: Data, ds: R.Graves(A)) -> Bool:
+  CL.hmap_wf(~Nat, ~R.Dead<A>, ~R.dead.hash, ~Nat.is_eq, ds)
 
 # Ticket i was running in s when it completed: issued (below s's next id), not pending, and not dead.
 # Complete then takes it from the running list, and any ops run after.
@@ -126,19 +123,21 @@ law complete_never_selected:
   for s: R.State<A>
   for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
   for idle: {has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}
-  for alive: {has.dead(A, R.dead(A, s), i) == False{} : Bool}
+  for alive: {R.dead.get(~A, R.dead(A, s), i) == None{} : Maybe<&2, R.Dead<A>>}
+  for wf: {dead.wf(~A, R.dead(A, s)) == True{} : Bool}
   for ops: List<&2, R.Op<A>>
   for now: Nat
   for t: Q.Ticket<A>
   for e: {next(~A, now, live(~A, ops, R.step(~A, s, R.Complete{i}))) == Some{t} : Maybe<&2, Q.Ticket<A>>}
   {Nat.is_eq(Q.id(A, t), i) == False{} : Bool}
 
-# Cancel takes ticket i from every registry, so it needs no hypothesis but issue.
+# Cancel takes ticket i from every registry, so it needs no hypothesis but issue and a well-formed trie.
 law cancel_never_selected:
   for ~A: Data
   for +i: Nat
   for s: R.State<A>
   for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
+  for wf: {dead.wf(~A, R.dead(A, s)) == True{} : Bool}
   for ops: List<&2, R.Op<A>>
   for now: Nat
   for t: Q.Ticket<A>
@@ -156,7 +155,8 @@ law recovered_never_selected:
   for +s: R.State<A>
   for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
   for idle: {has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}
-  for alive: {has.dead(A, R.dead(A, s), i) == False{} : Bool}
+  for alive: {R.dead.get(~A, R.dead(A, s), i) == None{} : Maybe<&2, R.Dead<A>>}
+  for wf: {dead.wf(~A, R.dead(A, s)) == True{} : Bool}
   for +ops: List<&2, R.Op<A>>
   for r: R.State<A>
   for back: {replayed(~A, ~X, ~enc, ~dec, ops, R.step(~A, s, R.Complete{i})) == Some{r} : Maybe<&2, R.State<A>>}
@@ -189,12 +189,21 @@ law dead_never_selected:
   for fresh: MNat.lt(i, Q.next_id(A, R.queue(A, s)))
   for idle: {has(A, Q.pending(A, R.queue(A, s)), i) == False{} : Bool}
   for w: R.Why
+  for at: Nat
   for ops: List<&2, R.Op<A>>
   for kept: {revives(A, ops, i) == False{} : Bool}
   for now: Nat
   for t: Q.Ticket<A>
-  for e: {next(~A, now, live(~A, ops, R.step(~A, s, R.Abandon{i, w}))) == Some{t} : Maybe<&2, Q.Ticket<A>>}
+  for e: {next(~A, now, live(~A, ops, R.step(~A, s, R.Abandon{i, w, at}))) == Some{t} : Maybe<&2, Q.Ticket<A>>}
   {Nat.is_eq(Q.id(A, t), i) == False{} : Bool}
+
+# Every op keeps the dead-ticket trie well formed.
+law dead_wf:
+  for ~A: Data
+  for s: R.State<A>
+  for wf: {dead.wf(~A, R.dead(A, s)) == True{} : Bool}
+  for op: R.Op<A>
+  {dead.wf(~A, R.dead(A, R.step(~A, s, op))) == True{} : Bool}
 
 # ---- the pool bounds the attempts
 
@@ -286,7 +295,7 @@ law settled_complete:
   for +r: Nat
   {R.after(A, Retry.Settled{}, p, b, id, n, now, r) == R.Complete{id} : R.Op<A>}
 
-# An unsafe failure must not repeat, so its ticket is dead.
+# An unsafe failure must not repeat, so its ticket is dead from now.
 law unsafe_abandon:
   for -A: Data
   for p: Retry.Policy
@@ -295,7 +304,7 @@ law unsafe_abandon:
   for +n: Nat
   for +now: Nat
   for +r: Nat
-  {R.after(A, Retry.Unsafe{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyUnsafe{}} : R.Op<A>}
+  {R.after(A, Retry.Unsafe{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyUnsafe{}, now} : R.Op<A>}
 
 # Another try would repeat the failure, so its ticket is dead after this attempt.
 law failed_abandon:
@@ -306,7 +315,7 @@ law failed_abandon:
   for +n: Nat
   for +now: Nat
   for +r: Nat
-  {R.after(A, Retry.Failed{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyFailed{}} : R.Op<A>}
+  {R.after(A, Retry.Failed{}, p, b, id, n, now, r) == R.Abandon{id, R.WhyFailed{}, now} : R.Op<A>}
 
 # When retry.plan stops a transient failure, its ticket is dead: spent when no attempt is left, else late.
 law transient_abandon:
@@ -319,4 +328,4 @@ law transient_abandon:
   for +now: Nat
   for +r: Nat
   for e: {Retry.plan(Retry.Transient{a}, p, b, n, now, r) == Retry.PlanStop{} : Retry.Plan}
-  {R.after(A, Retry.Transient{a}, p, b, id, n, now, r) == R.Abandon{id, R.gave(b)} : R.Op<A>}
+  {R.after(A, Retry.Transient{a}, p, b, id, n, now, r) == R.Abandon{id, R.gave(b), now} : R.Op<A>}

@@ -6,6 +6,7 @@ import bend-kit-scheduler@0.3.0.0/queue.bend as Q
 import bend-kit-files@0.2.0.0/files.bend as Files
 import bend-kit-collections@0.1.3.0/heap.bend as H
 import bend-kit-collections@0.1.3.0/omap.bend as O
+import bend-kit-collections@0.1.3.0/hmap.bend as M
 import ./runner.bend as R
 import ./example.bend as Example
 
@@ -77,10 +78,14 @@ def show(m: Maybe<&2, R.Op<String>>) -> String:
       "requeue " ++ Nat.show(i) ++ " " ++ Nat.show(d)
     case Some{R.Defer{i, d}}:
       "defer " ++ Nat.show(i) ++ " " ++ Nat.show(d)
-    case Some{R.Abandon{i, w}}:
-      "abandon " ++ Nat.show(i) ++ " " ++ show.why(w)
+    case Some{R.Abandon{i, w, at}}:
+      "abandon " ++ Nat.show(i) ++ " " ++ show.why(w) ++ " " ++ Nat.show(at)
     case Some{R.Revive{i, d}}:
       "revive " ++ Nat.show(i) ++ " " ++ Nat.show(d)
+    case Some{R.Purge{t}}:
+      "purge " ++ Nat.show(t)
+    case Some{R.PurgeAll{}}:
+      "purge all"
     case Some{R.Break{k, b}}:
       "break " ++ k ++ " " ++ show.brk(b)
 
@@ -100,8 +105,13 @@ def live(ops: List<&2, R.Op<String>>, s: R.State<String>) -> R.State<String>:
 # Two tickets pending, one running, one requeued once, one cancelled, one dead, and three breakers.
 def sample() -> R.State<String>:
   live([R.Enqueue{5n, "a"}, R.Enqueue{big(), "b|c"}, R.Enqueue{3n, ""}, R.Select{10n}, R.Requeue{2n, 20n}, R.Select{30n}, R.Enqueue{1n, "d"},
-    R.Enqueue{40n, "e"}, R.Cancel{4n}, R.Select{30n}, R.Abandon{0n, R.WhyUnsafe{}}, R.Break{"local", Retry.CircuitClosed{[7n]}},
+    R.Enqueue{40n, "e"}, R.Cancel{4n}, R.Select{30n}, R.Abandon{0n, R.WhyUnsafe{}, big()}, R.Break{"local", Retry.CircuitClosed{[7n]}},
     R.Break{"λ:443", Retry.CircuitClosed{[1n, big()]}}, R.Break{"h", Retry.CircuitHalf{2n}}, R.Break{"local", Retry.CircuitOpen{big()}}], R.new(String))
+
+# Three tickets abandoned at 10, 20, and 30, so that the dead-ticket trie has a branch.
+def graveyard() -> R.State<String>:
+  live([R.Enqueue{0n, "x"}, R.Enqueue{0n, "y"}, R.Enqueue{0n, "z"}, R.Select{0n}, R.Select{0n}, R.Select{0n},
+    R.Abandon{0n, R.WhyFailed{}, 10n}, R.Abandon{1n, R.WhySpent{}, 20n}, R.Abandon{2n, R.WhyLate{}, 30n}], R.new(String))
 
 def brk(s: R.State<String>, +key: String) -> String:
   show.brk(R.brk.get(String, s, key))
@@ -128,18 +138,21 @@ def fails(ts: List<&1, Nat & R.Try>) -> Nat:
     case Con{(i, R.Try{f, st}), rest}:
       Nat.add(f, fails(rest))
 
-# Each dead ticket as id:why:payload, newest first.
-def graves(ds: List<&2, R.Dead<String>>) -> String:
+def graves.go(ds: List<&2, R.Dead<String>>) -> List<&2, String>:
   match ds:
     case Nil{}:
-      ""
-    case Con{R.Dead{Q.Ticket{i, d, x}, w}, rest}:
-      Nat.show(i) ++ ":" ++ show.why(w) ++ ":" ++ x ++ " " ++ graves(rest)
+      Nil{}
+    case Con{R.Dead{Q.Ticket{i, d, x}, w, at}, rest}:
+      Con{Nat.show(i) ++ ":" ++ show.why(w) ++ ":" ++ x, graves.go(rest)}
+
+# Each dead ticket as id:why:payload, sorted, then a space.
+def graves(ds: R.Graves(String)) -> String:
+  String.join(List.sort(~String, ~String.is_le, graves.go(R.dead.list(String, ds))), " ") ++ " "
 
 def describe(s: R.State<String>) -> String:
   R.State{Q.State{+n, +h, +run}, +ts, +ds, +bs} = s
   "next=" ++ Nat.show(n) ++ " pending=" ++ Nat.show(R.pending(String, R.State{Q.State{n, h, run}, ts, ds, bs})) ++ " running=" ++ Nat.show(List.length(&2, Q.Ticket<String>, run)) ++
-    " tries=" ++ U32.show(O.OMap.size(Nat, R.Try, ts)) ++ " fails=" ++ Nat.show(fails(O.OMap.to_list(Nat, R.Try, ts))) ++ " dead=" ++ Nat.show(List.length(&2, R.Dead<String>, ds))
+    " tries=" ++ U32.show(O.OMap.size(Nat, R.Try, ts)) ++ " fails=" ++ Nat.show(fails(O.OMap.to_list(Nat, R.Try, ts))) ++ " dead=" ++ Nat.show(M.HMap.size(Nat, R.Dead<String>, ds))
 
 def snapshots() -> IO(Unit):
   do IO<Unit>:
@@ -156,6 +169,13 @@ def snapshots() -> IO(Unit):
     same(rec(Bytes.snd(Bytes.slice(R.encode.snap(~String, ~penc, sample()), 0, 60))), "none", "a short snapshot does not decode")
     same(rec(Bytes.append(R.encode.snap(~String, ~penc, sample()), Bytes.new(4))), "none", "a snapshot with octets after it does not decode")
     same(rec(Bytes.set(R.encode.snap(~String, ~penc, sample()), 12, 2)), "none", "a snapshot flag other than 0 or 1 does not decode")
+    same(graves(R.dead(String, graveyard())), "0:failed:x 1:spent:y 2:late:z ", "each dead ticket keeps its payload and why")
+    same(rec(R.encode.snap(~String, ~penc, graveyard())), hex(graveyard()), "a snapshot decodes to the same dead-ticket trie")
+    same(graves(R.dead(String, R.step(~String, graveyard(), R.Purge{20n}))), "1:spent:y 2:late:z ", "a Purge drops only the tickets abandoned before its time")
+    same(rec(R.encode.snap(~String, ~penc, R.step(~String, graveyard(), R.Purge{20n}))), hex(R.step(~String, graveyard(), R.Purge{20n})), "a snapshot after a Purge round-trips")
+    same(describe(R.step(~String, graveyard(), R.PurgeAll{})), "next=3 pending=0 running=0 tries=0 fails=0 dead=0", "a PurgeAll drops every dead ticket")
+    same(describe(R.step(~String, R.step(~String, graveyard(), R.Purge{20n}), R.Revive{0n, 5n})), "next=3 pending=0 running=0 tries=0 fails=0 dead=2", "a purged ticket does not revive")
+    same(describe(R.step(~String, graveyard(), R.Revive{1n, 5n})), "next=3 pending=1 running=0 tries=1 fails=0 dead=2", "a Revive takes one dead ticket by id")
 
 def codec() -> IO(Unit):
   +t = big()
@@ -167,11 +187,13 @@ def codec() -> IO(Unit):
     same(rt(R.Cancel{8n}), "cancel 8", "a Cancel keeps its id")
     same(rt(R.Requeue{9n, t}), "requeue 9 1700000000123", "a Requeue keeps its id and deadline")
     same(rt(R.Defer{10n, t}), "defer 10 1700000000123", "a Defer keeps its id and deadline")
-    same(rt(R.Abandon{11n, R.WhySpent{}}), "abandon 11 spent", "an Abandon keeps its id and a spent why")
-    same(rt(R.Abandon{11n, R.WhyLate{}}), "abandon 11 late", "an Abandon keeps a late why")
-    same(rt(R.Abandon{11n, R.WhyUnsafe{}}), "abandon 11 unsafe", "an Abandon keeps an unsafe why")
-    same(rt(R.Abandon{11n, R.WhyFailed{}}), "abandon 11 failed", "an Abandon keeps a failed why")
+    same(rt(R.Abandon{11n, R.WhySpent{}, t}), "abandon 11 spent 1700000000123", "an Abandon keeps its id, a spent why, and its time")
+    same(rt(R.Abandon{11n, R.WhyLate{}, 0n}), "abandon 11 late 0", "an Abandon keeps a late why")
+    same(rt(R.Abandon{11n, R.WhyUnsafe{}, 0n}), "abandon 11 unsafe 0", "an Abandon keeps an unsafe why")
+    same(rt(R.Abandon{11n, R.WhyFailed{}, 0n}), "abandon 11 failed 0", "an Abandon keeps a failed why")
     same(rt(R.Revive{12n, t}), "revive 12 1700000000123", "a Revive keeps its id and deadline")
+    same(rt(R.Purge{t}), "purge 1700000000123", "a Purge keeps its time")
+    same(rt(R.PurgeAll{}), "purge all", "a PurgeAll round-trips")
     same(rt(R.Break{"λ:443", Retry.CircuitClosed{[t, 5n]}}), "break λ:443 closed 1700000000123 5", "a Break keeps its target and a closed breaker's failures")
     same(rt(R.Break{"", Retry.CircuitClosed{[]}}), "break  closed", "a Break keeps an empty target and no failures")
     same(rt(R.Break{"t", Retry.CircuitOpen{t}}), "break t open 1700000000123", "a Break keeps an open breaker's until")
@@ -179,9 +201,10 @@ def codec() -> IO(Unit):
     same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Break{"t", Retry.CircuitHalf{3n}}), 12, 3))), "none", "a Break with an unknown kind is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.append(R.encode(~String, ~penc, R.Break{"t", Retry.CircuitHalf{3n}}), Bytes.new(4)))), "none", "a Break with octets after it is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Break{"t", Retry.CircuitHalf{3n}}), 0, 20)))), "none", "a short Break is not an op")
-    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}}), 12, 4))), "none", "an Abandon with an unknown why is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}, 0n}), 12, 4))), "none", "an Abandon with an unknown why is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Abandon{11n, R.WhySpent{}, 0n}), 0, 20)))), "none", "an Abandon without its time is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.from_string("abc"))), "none", "a record shorter than a head is not an op")
-    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 11))), "none", "an unknown tag is not an op")
+    same(show(R.decode(~String, ~pdec, Bytes.set(R.encode(~String, ~penc, R.Cancel{8n}), 0, 13))), "none", "an unknown tag is not an op")
     same(show(R.decode(~String, ~pdec, Bytes.snd(Bytes.slice(R.encode(~String, ~penc, R.Cancel{8n}), 0, 16)))), "none", "a short Cancel is not an op")
 
 # ---- jobs: "log|kind:name". work notes the job in log, runs it, then notes "end" and the job, and answers by kind.
@@ -518,6 +541,36 @@ def compaction.auto(+dir: String) -> IO(Unit):
     r5 : R.Runner<String> <- opened(path, 100n)
     closed("next=2 pending=0 running=0 tries=0 fails=0 dead=1", "reopen after automatic compaction replays the same state", view(r5))
 
+# Two jobs die, then a third. A purge at a time between them drops the first two as one record.
+# It survives a reopen and a compaction, and a later purge of all dead jobs survives a reopen.
+def purged(+dir: String) -> IO(Unit):
+  +path = dir ++ "/purge.journal"
+  +log = dir ++ "/purge.log"
+  do IO<Unit>:
+    r0 : R.Runner<String> <- opened(path, 100n)
+    r1 : R.Runner<String> <- enq(r0, 0n, log ++ "|dead:a")
+    r2 : R.Runner<String> <- enq(r1, 0n, log ++ "|dead:b")
+    r3 : R.Runner<String> <- drain(r2)
+    t : Nat <- R.clock()
+    IO.sleep(5)
+    r4 : R.Runner<String> <- enq(r3, 0n, log ++ "|dead:c")
+    r5 : R.Runner<String> <- drain(r4)
+    y : R.Ran(String) <- R.purge(~String, ~penc, r5, Nat.add(t, 1n))
+    r6 : R.Runner<String> <- ran(y)
+    closed("next=3 pending=0 running=0 tries=0 fails=0 dead=1", "purge drops the jobs that died before its time", view(r6))
+    r7 : R.Runner<String> <- opened(path, 100n)
+    r8 : R.Runner<String> <- held(dead.of(R.state(String, r7)), "2:failed:" ++ log ++ "|dead:c ", "a purge survives a reopen")
+    z : R.Ran(String) <- R.compact(~String, ~penc, r8)
+    r9 : R.Runner<String> <- compacted(z)
+    R.close(String, r9)
+    r10 : R.Runner<String> <- opened(path, 100n)
+    r11 : R.Runner<String> <- held(dead.of(R.state(String, r10)), "2:failed:" ++ log ++ "|dead:c ", "a purge survives compaction")
+    p : R.Ran(String) <- R.purge.all(~String, ~penc, r11)
+    r12 : R.Runner<String> <- ran(p)
+    R.close(String, r12)
+    r13 : R.Runner<String> <- opened(path, 100n)
+    closed("next=3 pending=0 running=0 tries=0 fails=0 dead=0", "a purge of all dead jobs survives a reopen", view(r13))
+
 def found.hex(m: Maybe<&2, R.State<String>>) -> String:
   match m:
     case None{}:
@@ -720,6 +773,7 @@ def all(+dir: String) -> IO(Unit):
   do IO<Unit>:
     durable(dir)
     failed(dir)
+    purged(dir)
     crash(dir)
     breaker(dir)
     breaker.restart(dir)
