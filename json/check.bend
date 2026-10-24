@@ -1,6 +1,6 @@
 import Base
 import ./json.bend as Json
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import ../encoding/encoding.bend as Enc
 
 def show(m: Maybe<&1, Json.Val>) -> IO(Unit):

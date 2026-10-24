@@ -74,7 +74,7 @@ Each package README has the import, one example, and the limits that change the 
 | Package | Import | What it does |
 |---|---|---|
 | [`bytes`](bytes) | `bend-kit-bytes@0.3.3.0/bytes.bend` | Packed byte buffers, cursors, endian integers, search, hex, base64, and decimal U32. |
-| [`encoding`](encoding) | `bend-kit-encoding@0.4.0.0/encoding.bend` | UTF-8 between `String` and `Bytes`. |
+| [`encoding`](encoding) | `bend-kit-encoding@0.5.0.0/encoding.bend` | UTF-8 between `String` and `Bytes`. |
 | [`unicode`](unicode) | `bend-kit-unicode@0.1.0.0/unicode.bend` | Unicode 17.0 category, NFC/NFD, case folding, and grapheme clusters. |
 | [`regex`](regex) | `bend-kit-regex@0.7.0.0/regex.bend` | Linear-time RE2 matching, with capture groups. |
 | [`parse`](parse) | `bend-kit-parse@0.1.0.1/parse.bend` | Parser combinators over text. `parse/json.bend` is a JSON grammar on them, not the `json` package. |
@@ -88,7 +88,7 @@ Each package README has the import, one example, and the limits that change the 
 |---|---|---|
 | [`f64`](f64) | `bend-kit-f64@0.1.0.0/f64.bend` | IEEE 754 binary64 add, subtract, multiply, and divide. Soft-float on two `U32` halves. |
 | [`bignum`](bignum) | `bend-kit-bignum@0.1.0.0/bigint.bend` | Exact integers, decimals, and rationals. Import `decimal.bend` or `rational.bend` for those types. |
-| [`json`](json) | `bend-kit-json@0.6.1.1/json.bend` | JSON values as RFC 8259, over `Bytes`. |
+| [`json`](json) | `bend-kit-json@0.7.0.0/json.bend` | JSON values as RFC 8259, over `Bytes`. |
 | [`csv`](csv) | `bend-kit-csv@0.2.0.0/csv.bend` | RFC 4180 records over `Bytes`. |
 | [`cbor`](cbor) | `bend-kit-cbor@0.2.0.0/cbor.bend` | RFC 8949 encode and decode over `Bytes`. |
 | [`protobuf`](protobuf) | `bend-kit-protobuf@0.1.0.0/protobuf.bend` | Pure bounded proto3 messages over `Bytes`, with typed `protoc` code generation. |
