@@ -104,7 +104,7 @@ Each package README has the import, one example, and the limits that change the 
 |---|---|---|
 | [`url`](url) | `bend-kit-url@0.4.1.0/url.bend` | RFC 3986 parse, resolve, and percent-encoding. |
 | [`netip`](netip) | `bend-kit-netip@0.1.0.0/netip.bend` | IPv4, IPv6, and CIDR values. No DNS. |
-| [`dns`](dns) | `bend-kit-dns@0.6.0.3/dns.bend` | DNS codec and host lookup. |
+| [`dns`](dns) | `bend-kit-dns@0.6.0.4/dns.bend` | DNS codec and host lookup. |
 | [`wire`](wire) | `bend-kit-wire@0.4.6.2/wire.bend` | TCP, UDP, and TLS sockets. |
 | [`http`](http) | `bend-kit-http@0.37.0.0/http.bend` | HTTP/1.1 and HTTP/2 client, and an HTTP/1.1 server. |
 | [`http2`](http2) | `bend-kit-http2@0.3.0.0/http2.bend` | RFC 9113 frames and an HTTP/2 client. HPACK is `hpack.bend`. |

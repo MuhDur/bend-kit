@@ -3,10 +3,10 @@
 A DNS codec and host lookup. `query` and `answer` are pure. Lookup is `IO`.
 
 ```bend
-import bend-kit-dns@0.6.0.3/dns.bend as Dns
+import bend-kit-dns@0.6.0.4/dns.bend as Dns
 ```
 
-`query(id, name)` builds a standard A query, or `None` for an empty label, a label longer than 63 bytes, or a non-ASCII label. A final dot is accepted. The code does not check the total wire-name length. `answer(id, msg)` returns the first A record for that id, skipping CNAMEs before it.
+`query(id, name)` builds a standard A query, or `None` for an empty label, a label longer than 63 bytes, a non-ASCII label, or a name longer than 255 bytes in wire form (RFC 1035 §2.3.4). A final dot is accepted. `answer(id, msg)` returns the first A record for that id, skipping CNAMEs before it.
 
 `resolve(host)` returns the first address. `resolve.all(host)` returns every address in OS order, IPv6 and IPv4. A literal IP and `localhost` (`::1`, then `127.0.0.1`) do not call the OS. Other names use `getaddrinfo`.
 

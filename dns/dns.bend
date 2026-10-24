@@ -75,8 +75,9 @@ def query.if(+id: U32, +xs: List<&2, String>, ok: Bool) -> Maybe<&1, Bytes.Bytes
       c = written(Bytes.Cursor.put.u16be(c, 1))
       query.done(Bytes.Cursor.finish(c))
 
+# §2.3.4: a name is at most 255 octets in wire form, its final zero octet included.
 def query.labels(+id: U32, +xs: List<&2, String>) -> Maybe<&1, Bytes.Bytes>:
-  query.if(id, xs, labels.ok(xs))
+  query.if(id, xs, Bool.and(labels.ok(xs), U32.is_le(labels.len(xs, 0), 254)))
 
 def strip_dot.if(+s: String, dot: Bool) -> String:
   match dot:
