@@ -5,3 +5,6 @@
 bend-kit-hairpin@0.10.0.0  # hairpin importers re-pin to 0.11.0.0 (#551)
 bend-kit-http@0.36.0.0  # http importers re-pin to 0.36.0.1 (#556)
 bend-kit-bytes@0.3.2.0  # importers re-pin to bytes 0.3.3.0 (#578)
+bend-kit-json@0.6.1.1  # importers re-pin to json 0.7.0.0 (#578)
+bend-kit-encoding@0.4.0.0  # importers re-pin to encoding 0.5.0.0 (#578)
+bend-kit-dns@0.6.0.3  # importers re-pin to dns 0.6.0.4 (#572)
