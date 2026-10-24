@@ -28,20 +28,20 @@ def wait_bend():
 
 
 def parse(text):
-    """-> {op: (ms, checksum, pending/next)}. Baselines print `replay ms chk n`; Bend prints chk, n, then ms per op."""
+    """-> {op: (ms, checksum, pending/next)}. Baselines print `op ms chk n`; Bend prints chk, n, then ms per op."""
     got = {}
     for line in text.splitlines():
         p = line.split("\t")
         if len(p) == 3 and p[0] in ("chk", "n", "ms"):
             got.setdefault(p[1], {})[p[0]] = float(p[2]) if p[0] == "ms" else p[2]
-        elif len(p) == 4 and p[0] == "replay":
+        elif len(p) == 4 and p[0] in ("replay", "dead"):
             got[p[0]] = {"ms": float(p[1]), "chk": p[2], "n": p[3]}
     return {op: (d.get("ms"), d.get("chk"), d.get("n")) for op, d in got.items()}
 
 
 def main():
     OUT.mkdir(exist_ok=True)
-    times, checks = {}, set()
+    times, checks = {}, {}
     for name, (build, run) in VARIANTS.items():
         if name == "Bend":
             wait_bend()
@@ -60,10 +60,10 @@ def main():
             if len({(g[op][1], g[op][2]) for g in runs}) != 1:
                 sys.exit(f"{name} {op} checksum changed between runs: {runs}")
             times[(op, name)] = statistics.median(g[op][0] for g in runs)
-            checks.add(runs[0][op][1:])
+            checks.setdefault("replay" if op == "compacted" else op, set()).add(runs[0][op][1:])
         print(f"ran {name}", file=sys.stderr)
 
-    if len(checks) != 1:
+    if any(len(c) != 1 for c in checks.values()):
         sys.exit(f"checksum mismatch: {checks}")
     names = list(VARIANTS)
     best = min(times.values()) or 0.001
@@ -72,9 +72,10 @@ def main():
     for op in dict.fromkeys(op for op, _ in times):
         cells = [f"{times[(op, n)]:,.1f} ({times[(op, n)] / best:.1f}x)" if (op, n) in times else "-" for n in names]
         print(f"| {op} | " + " | ".join(cells) + " |")
-    chk, n = next(iter(checks))
     print()
-    print(f"checksum: {chk}, pending/next: {n}")
+    for op, c in checks.items():
+        chk, n = next(iter(c))
+        print(f"{op}: checksum {chk}, pending/next {n}")
 
 
 if __name__ == "__main__":
