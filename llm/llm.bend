@@ -504,7 +504,7 @@ def open.budget(+api: Api, +base: String, +headers: Map<&2, List<&2, String>>, b
     Hairpin.open.as(~open.judge, h, b, True{}, enc, "POST", url(api, base), headers, body)
 
 # Any request body that asks for SSE, as for tools. The open retries as call does, on a budget of n + 1.
-# A stream opens its own connection, outside the pool.
+# A stream opens on the client's pool. Close it with stream.close to give its connection back.
 def stream.raw(c: Client, v: Json.Val) -> IO(Client & Result<&1, &1, Err, Stream>):
   Client{+api, +base, +headers, +ms, +n, h} = c
   do IO<Client & Result<&1, &1, Err, Stream>>:
@@ -517,9 +517,13 @@ def stream(c: Client, req: Req) -> IO(Client & Result<&1, &1, Err, Stream>):
   Client{+api, b, h, ms, n, http} = c
   stream.raw(Client{api, b, h, ms, n, http}, body(api, req, True{}))
 
-def stream.close(s: Stream) -> IO(Unit):
-  Stream{api, h, rd} = s
-  Http.stream.close(h)
+# Close a stream. A stream read to its end gives its connection to the client's pool.
+def stream.close(c: Client, s: Stream) -> IO(Client):
+  Client{api, base, headers, ms, n, h} = c
+  Stream{sa, st, rd} = s
+  do IO<Client>:
+    p : Hairpin.Client <- Hairpin.stream.close(h, st)
+    return Client{api, base, headers, ms, n, p}
 
 # The reader after the next event, or the stream's result.
 type Rn is Type:

@@ -62,30 +62,30 @@ def sent(+name: String, x: Llm.Client & Result<&1, &1, Llm.Err, Llm.Reply>) -> I
         IO.print("ok " ++ name ++ " send: " ++ text ++ " [" ++ stop ++ ", " ++ U32.show(i) ++ " in, " ++ U32.show(o) ++ " out]")
         return c
 
-def pieces(f: Nat, +name: String, x: Llm.Stream & Result<&1, &1, Llm.Err, Maybe<&2, String>>, acc: String) -> IO(Unit):
+def pieces(f: Nat, +name: String, c: Llm.Client, x: Llm.Stream & Result<&1, &1, Llm.Err, Maybe<&2, String>>, acc: String) -> IO(Llm.Client):
   match f:
     case 0n:
       (s, r) = x
-      do IO<Unit>:
-        Llm.stream.close(s)
+      do IO<Llm.Client>:
         IO.print("fail " ++ name ++ " stream: too many pieces")
+        Llm.stream.close(c, s)
     case 1n+g:
       (s, r) = x
       match r:
         case Fail{e}:
-          do IO<Unit>:
-            Llm.stream.close(s)
+          do IO<Llm.Client>:
             IO.print("fail " ++ name ++ " stream: " ++ err(e))
+            Llm.stream.close(c, s)
         case Done{m}:
           match m:
             case None{}:
-              do IO<Unit>:
-                Llm.stream.close(s)
+              do IO<Llm.Client>:
                 IO.print("ok " ++ name ++ " stream: " ++ acc)
+                Llm.stream.close(c, s)
             case Some{t}:
-              do IO<Unit>:
+              do IO<Llm.Client>:
                 y : Llm.Stream & Result<&1, &1, Llm.Err, Maybe<&2, String>> <- Llm.next(s)
-                pieces(g, name, y, acc ++ t)
+                pieces(g, name, c, y, acc ++ t)
 
 def streamed(+name: String, x: Llm.Client & Result<&1, &1, Llm.Err, Llm.Stream>) -> IO(Llm.Client):
   (c, r) = x
@@ -97,8 +97,7 @@ def streamed(+name: String, x: Llm.Client & Result<&1, &1, Llm.Err, Llm.Stream>)
     case Done{s}:
       do IO<Llm.Client>:
         y : Llm.Stream & Result<&1, &1, Llm.Err, Maybe<&2, String>> <- Llm.next(s)
-        pieces(4096n, name, y, "")
-        return c
+        pieces(4096n, name, c, y, "")
 
 def run(+name: String, c: Llm.Client, +model: String) -> IO(Unit):
   do IO<Unit>:
