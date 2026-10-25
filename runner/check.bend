@@ -245,6 +245,9 @@ def target(s: String) -> String:
 def config(+threshold: Nat, +every: U32) -> R.Config:
   R.Config{Retry.Policy{3n, 1n, 4, None{}}, Retry.Circuit{threshold, 60000n, 60000n, 1n}, 5, every}
 
+def config.idle() -> R.Config:
+  R.Config{Retry.Policy{3n, 1n, 4, None{}}, Retry.Circuit{100n, 60000n, 60000n, 1n}, 1000, 0}
+
 def opened.every(+path: String, +threshold: Nat, +every: U32, +max: U32) -> IO(R.Runner<String>):
   IO.try(R.Runner<String>, R.open(~String, ~penc, ~pdec, path, max, 1048576, config(threshold, every), 2n))
 
@@ -769,6 +772,35 @@ def asks.close(+dir: String) -> IO(Unit):
     r2 : R.Runner<String> <- opened(path, 100n)
     closed("next=0 pending=0 running=0 tries=0 fails=0 dead=0", "reopen finds no Enqueue for the refused ask", view(r2))
 
+def prompt(+log: String, m: Maybe<&1, R.Out(Nat)>) -> IO(Unit):
+  match m:
+    case None{}:
+      note(log, "late")
+    case Some{y}:
+      answered(log, y)
+
+# Another fiber enqueues job n 100 ms into the drain's idle wait, and needs its answer within 500 ms.
+def waker(ib: Chan(R.Msg<String>), +log: String) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(100)
+    m : Maybe<&1, R.Out(Nat)> <- IO.within(R.Out(Nat), 500, R.ask.enqueue(String, ib, 0n, log ++ "|ok:n"))
+    prompt(log, m)
+
+# Idle 1 s, and one job due in 1.5 s. An ask during the idle wait answers at once, and its job runs in the same drain.
+def asks.idle(+dir: String) -> IO(Unit):
+  +path = dir ++ "/idle.journal"
+  +log = dir ++ "/idle.log"
+  +c = config.idle()
+  do IO<Unit>:
+    r0 : R.Runner<String> <- IO.try(R.Runner<String>, R.open(~String, ~penc, ~pdec, path, 4096, 1048576, c, 2n))
+    now : Nat <- R.clock()
+    r1 : R.Runner<String> <- enq(r0, Nat.add(now, 1500n), log ++ "|ok:d")
+    r2 : R.Runner<String> <- beside(R.inbox(String, r1), ib => waker(ib, log))
+    closed("next=2 pending=0 running=0 tries=0 fails=0 dead=0", "a job enqueued during the idle wait runs in the same drain", view(r2))
+    +ys : List<&2, String> <- read(log)
+    same(counts(ys, ["answered 1", "late", "end ok:n"]), "answered 1=1 late=0 end ok:n=1 ", "an ask during the idle wait answers within 500 ms")
+    same(last(ys, ""), "end ok:d", "the asked job ends before the job due later")
+
 def all(+dir: String) -> IO(Unit):
   do IO<Unit>:
     durable(dir)
@@ -781,6 +813,7 @@ def all(+dir: String) -> IO(Unit):
     asks(dir)
     asks.cancel(dir)
     asks.close(dir)
+    asks.idle(dir)
     compaction(dir)
     compaction.auto(dir)
     crash.snapshot(dir)

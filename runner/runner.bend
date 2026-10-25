@@ -1619,16 +1619,44 @@ def finished(-A: Data, r: Runner<A>) -> Runner<A> & Bool:
   Runner{j, +s, p, c, ib, fs} = r
   finished.of(A, idle(A, s), flights.none(A, fs), j, s, p, c, ib)
 
-def drain.ticked(-A: Data, +idle: U32, t: Runner<A> & Out(Bool), next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
+def drain.handled(-A: Data, t: Runner<A> & Out(Bool), next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
+  match t:
+    case (r, Fail{e}):
+      IO.pure(Ran(A), (r, Fail{e}))
+    case (r, Done{b}):
+      next(r)
+
+def drain.woke(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +idle: U32,
+    x: Poll<&1, &1, Maybe<&1, Msg<A>>, Unit>, r: Runner<A>, next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
+  match x:
+    case Ready{Some{m}}:
+      do IO<Ran(A)>:
+        t : Runner<A> & Out(Bool) <- tick.got(~A, ~penc, ~target, ~work, (r, Some{m}), True{}, 0n, Done{Unit{}},
+          (k => tick.run(~A, ~penc, ~target, ~work, 0n, True{}, k)))
+        drain.handled(A, t, next)
+    case Ready{None{}}:
+      do IO<Ran(A)>:
+        IO.sleep(idle)
+        next(r)
+    case Wait{u}:
+      next(r)
+
+def drain.wait(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +idle: U32, r: Runner<A>,
+    next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
+  Runner{j, s, p, c, +ib, fs} = r
+  do IO<Ran(A)>:
+    x : Poll<&1, &1, Maybe<&1, Msg<A>>, Unit> <- Chan.try_recv(Msg<A>, ib, idle)
+    drain.woke(~A, ~penc, ~target, ~work, idle, x, Runner{j, s, p, c, ib, fs}, next)
+
+def drain.ticked(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), +idle: U32,
+    t: Runner<A> & Out(Bool), next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
   match t:
     case (r, Fail{e}):
       IO.pure(Ran(A), (r, Fail{e}))
     case (r, Done{True{}}):
       next(r)
     case (r, Done{False{}}):
-      do IO<Ran(A)>:
-        IO.sleep(idle)
-        next(r)
+      drain.wait(~A, ~penc, ~target, ~work, idle, r, next)
 
 def drain.if(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), done: Bool, r: Runner<A>, next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
   match done:
@@ -1639,7 +1667,7 @@ def drain.if(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -
       Config{pol, circ, +idle, every} = c
       do IO<Ran(A)>:
         t : Runner<A> & Out(Bool) <- tick(~A, ~penc, ~target, ~work, Runner{j, s, p, c, ib, fs})
-        drain.ticked(A, idle, t, next)
+        drain.ticked(~A, ~penc, ~target, ~work, idle, t, next)
 
 def drain.at(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), x: Runner<A> & Bool, next: Runner<A> -> IO(Ran(A))) -> IO(Ran(A)):
   (r, done) = x
@@ -1649,7 +1677,8 @@ def drain.end(-A: Data, x: Runner<A> & Bool) -> Ran(A):
   (r, done) = x
   (r, Bool.pick(Out(Unit), done, Done{Unit{}}, Fail{(62, "runner: drain ran out of rounds")}))
 
-# Ticks until no ticket is pending or running and no attempt runs. It waits idle ms after a round that did nothing.
+# Ticks until no ticket is pending or running and no attempt runs. After a round that did nothing, it waits up to idle ms
+# for a message, and handles one that arrives at once.
 # Fails when fuel rounds leave work.
 def drain(~A: Data, ~penc: A -> Bytes.Bytes, ~target: A -> String, ~work: A -> IO(Retry.Outcome), fuel: Nat, r: Runner<A>) -> IO(Ran(A)):
   match fuel:
