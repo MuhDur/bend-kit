@@ -1,5 +1,5 @@
 import Base
-import bend-mathlib@0.7.2.0/nat.bend as MNat
+import bend-mathlib@0.7.4.0/nat.bend as MNat
 import ./lemmas.bend as Lemmas
 
 # A word of n bits has a value below 2^n.

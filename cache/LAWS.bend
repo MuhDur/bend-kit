@@ -1,5 +1,5 @@
 import Base
-import bend-mathlib@0.7.2.0/nat.bend as MNat
+import bend-mathlib@0.7.4.0/nat.bend as MNat
 import ./cache.bend as C
 import bend-kit-collections@0.1.3.0/LAWS.bend as CL
 import bend-kit-collections@0.1.3.0/order.bend as Order

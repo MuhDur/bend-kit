@@ -42,7 +42,7 @@ The proof model is exact mathematical Nat, with no modular arithmetic. **Bend 2.
 
 ## Proofs and checks
 
-`LAWS.bend` imports quantified queue and recurrence claims; `PROOF.bend` supplies constructive proofs. Queue claims use semantic predicates over every heap element and an ordered-heap predicate, rather than equality of internal heap shapes. Queue operations preserve that ordering predicate. Accurate cached heap sizes and element conservation rely on valid API construction and the pinned heap implementation; they are not additional quantified scheduler invariants. Nat comparison and arithmetic lemmas come from `bend-mathlib@0.7.2.0`. Payload equality is not needed for scheduling order; cancellation is by exact Nat ID.
+`LAWS.bend` imports quantified queue and recurrence claims; `PROOF.bend` supplies constructive proofs. Queue claims use semantic predicates over every heap element and an ordered-heap predicate, rather than equality of internal heap shapes. Queue operations preserve that ordering predicate. Accurate cached heap sizes and element conservation rely on valid API construction and the pinned heap implementation; they are not additional quantified scheduler invariants. Nat comparison and arithmetic lemmas come from `bend-mathlib@0.7.4.0`. Payload equality is not needed for scheduling order; cancellation is by exact Nat ID.
 
 ```sh
 scripts/check.sh scheduler

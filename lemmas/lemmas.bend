@@ -1,6 +1,6 @@
 # Proved laws that relate Word and U32 arithmetic to Nat. Source: https://github.com/paymog/bend-kit/tree/main/lemmas
 import Base
-import bend-mathlib@0.7.2.0/nat.bend as MNat
+import bend-mathlib@0.7.4.0/nat.bend as MNat
 
 # 2^n, by the doubling that Word.to_nat uses.
 def pow2(n: Nat) -> Nat:

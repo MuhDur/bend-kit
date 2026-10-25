@@ -1,5 +1,5 @@
 import Base
-import bend-mathlib@0.7.2.0/bool.bend as MBool
+import bend-mathlib@0.7.4.0/bool.bend as MBool
 import ./authz.bend as Az
 import ./LAWS.bend as Laws
 
