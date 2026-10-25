@@ -3,7 +3,7 @@
 A durable job runner (an outbox). It keeps a scheduler queue in a journal, bounds the attempts that run at once with a resources pool, and retries failed jobs with retry's policy and a breaker per target.
 
 ```bend
-import bend-kit-runner@0.10.0.0/runner.bend as R
+import bend-kit-runner@0.10.0.1/runner.bend as R
 ```
 
 It imports `bend-kit-journal@0.2.0.0`, `bend-kit-scheduler@0.3.0.0`, `bend-kit-resources@0.1.0.0`, `bend-kit-retry@0.2.0.0`, `bend-kit-time@0.2.0.0`, `bend-kit-collections@0.1.3.0`, `bend-kit-files@0.2.0.0`, and `bend-kit-bytes@0.3.2.0`. Payload codecs take and give that version's `Bytes`. Policies, budgets, and outcomes are `bend-kit-retry@0.2.0.0` types; tickets are `bend-kit-scheduler@0.3.0.0` types.
@@ -32,7 +32,7 @@ A job is a `String`. `work` prints it and succeeds. The journal file keeps the j
 import Base
 import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-runner@0.9.0.0/runner.bend as R
+import bend-kit-runner@0.10.0.1/runner.bend as R
 
 def penc(s: String) -> Bytes.Bytes:
   Bytes.from_string(s)
@@ -91,7 +91,7 @@ def main() -> IO(Unit):
 | `purge(~A, ~penc, r, before)` | Drops, as one record, the dead tickets that retry gave up on before `before` (wall-clock ms). |
 | `purge.all(~A, ~penc, r)` | Drops every dead ticket, as one record. |
 | `tick(~A, ~penc, ~target, ~work, r)` | One round: start an attempt for each due ticket that the pool admits, then read the inbox. As each attempt finishes, record its outcome, give back its unit, and start the next due ticket in that unit. Append and answer each ask. The round ends when no attempt runs and the inbox is empty, or when its fuel ends; attempts that still run stay in the runner for the next `tick`. Then compact when the journal grew past `compact`. `Done{True}` when an attempt ran or an ask was answered. |
-| `drain(~A, ~penc, ~target, ~work, fuel, r)` | Ticks until no ticket is pending or running and no attempt runs, waiting `idle` ms after a round that did nothing. Fails after `fuel` rounds with work left. |
+| `drain(~A, ~penc, ~target, ~work, fuel, r)` | Ticks until no ticket is pending or running and no attempt runs. After a round that did nothing, it waits up to `idle` ms for a message, and handles one that arrives at once. Fails after `fuel` rounds with work left. |
 | `inbox(A, r)` | The runner and its inbox, a `Chan(Msg<A>)`. Pass the inbox to another fiber. |
 | `ask.enqueue(A, inbox, deadline, x)` | From another fiber: `enqueue`, answered with the ticket id once the record is durable. |
 | `ask.cancel(A, inbox, id)` | From another fiber: `cancel`. A running attempt finishes, and its outcome does not requeue the ticket. |
@@ -167,7 +167,7 @@ A `Snap` record is tag 7 and the next id, then the pending heap, the running lis
 - **Clock.** Deadlines are wall-clock ms, so they keep their meaning across restarts. A clock that jumps moves every due time with it.
 - **Breakers.** Breaker state is journaled, so it survives a restart. A breaker's times are wall-clock ms, as deadlines are.
 - **One writer.** Nothing locks the journal. The fiber that holds the runner appends every op: other fibers send asks on the inbox, and `tick` appends each one before it changes the state. `tick` records each outcome as its attempt finishes, so a slow job holds only its own unit. A round takes at most one ticket for each ticket that was pending at its start or that an ask added.
-- **Asks.** An ask waits until the owner reads the inbox in `tick` or `drain`. `drain` reads it while an attempt runs; after a round that did nothing it sleeps `idle` ms first.
+- **Asks.** An ask waits until the owner reads the inbox in `tick` or `drain`. `drain` reads it while an attempt runs, and during its `idle` wait after a round that did nothing, so an ask answers without waiting out `idle`.
 - **Memory.** `open` reads the whole journal. Compaction bounds it by the live state plus the records since the last compaction; with `compact` at 0 and no `compact` call, the journal grows without bound.
 - **Rename.** Compaction relies on `rename` replacing the journal atomically, as POSIX gives within one directory.
 
