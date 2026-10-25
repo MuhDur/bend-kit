@@ -1,6 +1,6 @@
 import Base
-import bend-mathlib@0.7.2.0/nat.bend as MNat
-import bend-mathlib@0.7.2.0/bool.bend as MBool
+import bend-mathlib@0.7.4.0/nat.bend as MNat
+import bend-mathlib@0.7.4.0/bool.bend as MBool
 import ./LAWS.bend as Laws
 import ./omap.bend as O
 import ./hmap.bend as M
