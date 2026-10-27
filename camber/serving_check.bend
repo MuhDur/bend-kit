@@ -2,10 +2,10 @@
 import Base
 import ./camber.bend as C
 import ./input.bend as Input
-import bend-kit-http@0.37.0.0/http.bend as H
-import bend-kit-http@0.37.0.0/completion.bend as T
-import bend-kit-json@0.6.1.1/json.bend as J
-import bend-kit-bytes@0.3.2.0/bytes.bend as B
+import bend-kit-http@0.38.0.0/http.bend as H
+import bend-kit-http@0.38.0.0/completion.bend as T
+import bend-kit-json@0.7.0.0/json.bend as J
+import bend-kit-bytes@0.3.3.0/bytes.bend as B
 
 type Config is Data:
   Config{release: Chan(Unit)}

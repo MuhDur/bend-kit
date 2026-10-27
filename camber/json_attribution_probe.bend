@@ -1,8 +1,8 @@
 # Stage timings without HTTP, routing, hooks, or socket effects.
 import Base
 import ../json/json.bend as Json
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-time@0.2.0.0/time.bend as Time
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import bend-kit-time@0.3.0.0/time.bend as Time
 import ./prerequisites.bend as Probe
 
 def end_stage(label: String, started: Time.Duration) -> IO(Unit):

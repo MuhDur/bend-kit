@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `camber` 0.15.0.0, `hairpin` 0.13.0.0: import `http` 0.38.0.0, `bytes` 0.3.3.0, `json` 0.7.0.0, `time` 0.3.0.0, and, in `camber`, `notch` 0.4.0.0 and `files` 0.3.0.0. Breaking: `Http`, `Json`, and sibling types come from the new versions.
 - `http` 0.38.0.0, `postgres` 0.3.0.0, `redis` 0.3.0.0: import `bytes` 0.3.3.0 and `dns` 0.7.0.0, so a DNS name longer than 255 wire octets fails before a query is sent. `http` also imports `json` 0.7.0.0, `encoding` 0.5.0.0, `http2` 0.4.0.0, `time` 0.3.0.0, and `zlib` 0.4.0.0. Breaking: `Http.Body`, `Json.Val`, and sibling types come from the new versions.
 - `archive` 0.5.0.0, `dns` 0.7.0.0, `stream` 0.3.0.0, `websocket` 0.4.0.0: import `bytes` 0.3.3.0 and the re-pinned `files`, `hash`, and `zlib`. `archive` drops its second `bytes` 0.3.2.0 import. Breaking: `Bytes` and sibling types come from the new versions.
 - `cache` 0.3.0.0, `crdt` 0.2.0.0, `journal` 0.3.0.0, `notch` 0.4.0.0, `protobuf` 0.2.0.0, `regex` 0.8.0.0, `scheduler` 0.4.0.0, `zlib` 0.4.0.0: import `bytes` 0.3.3.0 and the re-pinned `cbor`, `collections` 0.1.4.1, `files`, `hash`, and `time`. Breaking: types from those siblings come from the new versions.
