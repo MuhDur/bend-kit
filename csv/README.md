@@ -3,8 +3,8 @@
 Parse and encode RFC 4180 records over `Bytes`. Fields are raw bytes. The package does not convert character encodings or remove spaces.
 
 ```bend
-import bend-kit-csv@0.2.0.0/csv.bend as Csv
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-csv@0.3.0.0/csv.bend as Csv
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 ```
 
 ```bend

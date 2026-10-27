@@ -3,7 +3,7 @@
 Clocks, `Duration`, `Instant`, Gregorian dates, RFC 3339, HTTP-date, and TZif zones.
 
 ```bend
-import bend-kit-time@0.2.0.0/time.bend as Time
+import bend-kit-time@0.3.0.0/time.bend as Time
 ```
 
 `now` is the wall clock. `mono` is a monotonic duration. Both are effects in `effs/time.c` and `effs/time.js`. Proofs do not cover them. There is no `BEND_LIB` override.
@@ -14,6 +14,6 @@ import bend-kit-time@0.2.0.0/time.bend as Time
 
 `rfc3339` formats an `Instant` as RFC 3339 text. It returns `None` when the date is outside the supported range. `rfc3339.parse` reads RFC 3339 text. `http_date.parse` reads an IMF-fixdate. The parsers return `None` for text they do not accept.
 
-`tzif.parse` reads a zone from packed bytes. This package imports `bend-kit-bytes@0.3.2.0`, `bend-kit-int@0.2.0.0`, and `bend-kit-fmt@0.1.0.0`. `Zone.local` gives the local date and time for an instant. It uses the POSIX footer after the last explicit transition.
+`tzif.parse` reads a zone from packed bytes. This package imports `bend-kit-bytes@0.3.3.0`, `bend-kit-int@0.2.0.0`, and `bend-kit-fmt@0.1.0.0`. `Zone.local` gives the local date and time for an instant. It uses the POSIX footer after the last explicit transition.
 
 `notch` imports an older time hash, `0x3bfb4ae4d3b87b90f01bfcd298211455`. `http@0.32.0.0` imports `bend-kit-time@0.1.2.1`. Hairpin imports 0.1.2.1 for Http's `Instant`s and 0.1.3.0 for `mono.ms`. Pass an `Instant` only into the version that expects it.

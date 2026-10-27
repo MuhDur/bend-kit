@@ -6,7 +6,7 @@ import ./omap.bend as O
 import ./hmap.bend as M
 import ./nat_order.bend as Ord
 import ./order.bend as Order
-import bend-kit-lemmas@0.1.0.0/lemmas.bend as Lemmas
+import bend-kit-lemmas@0.1.1.0/lemmas.bend as Lemmas
 
 def Laws.omap_keys_ascending_puts():
   {==}

@@ -1,8 +1,8 @@
 # Old subscription records, read through the real decode and migration chain by a billing consumer.
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-json@0.6.1.1/json.bend as Json
-import bend-kit-encoding@0.4.0.0/encoding.bend as Encoding
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import bend-kit-json@0.7.0.0/json.bend as Json
+import bend-kit-encoding@0.5.0.0/encoding.bend as Encoding
 import ./migrate.bend as M
 
 def ok(good: Bool, +name: String) -> IO(Unit):
