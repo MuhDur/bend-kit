@@ -8,7 +8,7 @@ import ../../../http/http.bend as Http
 import ../../../json/json.bend as Json
 import ../../../encoding/encoding.bend as Enc
 import ../../../router/router.bend as Router
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 
 type Hook is Data:
   RootAfter{}

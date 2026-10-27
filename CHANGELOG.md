@@ -8,6 +8,8 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `gateway` 0.3.0.0, `runner` 0.11.0.0: import `bytes` 0.3.3.0, `collections` 0.1.4.1, and the re-pinned `cache`, `camber`, `hairpin`, `http`, `journal`, `scheduler`, `time`, `files`, and `webhooks`. Every package in the kit now uses one version of each sibling. Breaking: sibling types come from the new versions.
+- `protobuf`: the `protoc` plugin's generated code imports `bytes` 0.3.3.0 and, by default, `protobuf` 0.2.0.0.
 - `jwt` 0.11.0.0, `llm` 0.13.0.0, `oauth2` 0.11.0.0, `sigv4` 0.11.0.0, `webhooks` 0.11.0.0: import `http` 0.38.0.0, `hairpin` 0.13.0.0, `bytes` 0.3.3.0, and the re-pinned `json`, `encoding`, `time`, and, in `sigv4`, `collections` 0.1.4.1. Breaking: `Http`, `Hairpin`, `Json`, and sibling types come from the new versions.
 - `camber` 0.15.0.0, `hairpin` 0.13.0.0: import `http` 0.38.0.0, `bytes` 0.3.3.0, `json` 0.7.0.0, `time` 0.3.0.0, and, in `camber`, `notch` 0.4.0.0 and `files` 0.3.0.0. Breaking: `Http`, `Json`, and sibling types come from the new versions.
 - `http` 0.38.0.0, `postgres` 0.3.0.0, `redis` 0.3.0.0: import `bytes` 0.3.3.0 and `dns` 0.7.0.0, so a DNS name longer than 255 wire octets fails before a query is sent. `http` also imports `json` 0.7.0.0, `encoding` 0.5.0.0, `http2` 0.4.0.0, `time` 0.3.0.0, and `zlib` 0.4.0.0. Breaking: `Http.Body`, `Json.Val`, and sibling types come from the new versions.

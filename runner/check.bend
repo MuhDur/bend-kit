@@ -1,12 +1,12 @@
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-journal@0.2.0.0/journal.bend as J
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import bend-kit-journal@0.3.0.0/journal.bend as J
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-scheduler@0.3.0.0/queue.bend as Q
-import bend-kit-files@0.2.0.0/files.bend as Files
-import bend-kit-collections@0.1.3.0/heap.bend as H
-import bend-kit-collections@0.1.3.0/omap.bend as O
-import bend-kit-collections@0.1.3.0/hmap.bend as M
+import bend-kit-scheduler@0.4.0.0/queue.bend as Q
+import bend-kit-files@0.3.0.0/files.bend as Files
+import bend-kit-collections@0.1.4.1/heap.bend as H
+import bend-kit-collections@0.1.4.1/omap.bend as O
+import bend-kit-collections@0.1.4.1/hmap.bend as M
 import ./runner.bend as R
 import ./example.bend as Example
 
