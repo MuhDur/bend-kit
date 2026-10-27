@@ -1,8 +1,8 @@
 import Base
 import ./llm.bend as Llm
 import ./sse.bend as Sse
-import bend-kit-json@0.6.1.1/json.bend as Json
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-json@0.7.0.0/json.bend as Json
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 
 def b(+s: String) -> Bytes.Bytes:
   Bytes.from_string(s)
