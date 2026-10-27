@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `cache` 0.3.0.0, `crdt` 0.2.0.0, `journal` 0.3.0.0, `notch` 0.4.0.0, `protobuf` 0.2.0.0, `regex` 0.8.0.0, `scheduler` 0.4.0.0, `zlib` 0.4.0.0: import `bytes` 0.3.3.0 and the re-pinned `cbor`, `collections` 0.1.4.1, `files`, `hash`, and `time`. Breaking: types from those siblings come from the new versions.
 - `cbor` 0.3.0.0, `csv` 0.3.0.0, `files` 0.3.0.0, `hash` 0.3.0.0, `http2` 0.4.0.0, `migrate` 0.3.0.0, `multipart` 0.3.0.0, `process` 0.5.0.0, `property` 0.4.0.0, `tar` 0.3.0.0, `time` 0.3.0.0: import `bytes` 0.3.3.0, and `migrate` imports `json` 0.7.0.0 and `encoding` 0.5.0.0. Breaking: `Bytes` and `Json` types come from those versions.
 - `collections` 0.1.4.1: `PROOF.bend` imports `lemmas` 0.1.1.0.
 - `lemmas` 0.1.1.0 and `collections` 0.1.4.0: take Nat and Bool lemmas from `bend-mathlib@0.7.4.0`. Every proof in the kit now imports that one mathlib version.

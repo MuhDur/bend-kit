@@ -3,10 +3,10 @@
 Replicated data types with proved merges. The package has two grow-only counters (G-Counters), as in Shapiro et al., "A comprehensive study of Convergent and Commutative Replicated Data Types" (2011). `GCounter` keys replicas by small dense indices. `KCounter` keys them by sparse IDs of any `Data` type, such as random 32-bit node IDs or `String` names. Each replica counts its own events. Replicas exchange whole states in any order, and every replica that has seen the same states holds the same counter.
 
 ```bend
-import bend-kit-crdt@0.1.1.0/crdt.bend as Crdt
+import bend-kit-crdt@0.2.0.0/crdt.bend as Crdt
 ```
 
-It imports `bend-kit-cbor@0.2.0.0` and `bend-kit-bytes@0.3.2.0` for the wire form.
+It imports `bend-kit-cbor@0.3.0.0` and `bend-kit-bytes@0.3.3.0` for the wire form.
 
 ## State
 
@@ -18,7 +18,7 @@ Replica 0 receives the state of replica 1 twice.
 
 ```bend
 import Base
-import bend-kit-crdt@0.1.1.0/crdt.bend as Crdt
+import bend-kit-crdt@0.2.0.0/crdt.bend as Crdt
 
 def total(m: Maybe<&2, U32>) -> String:
   match m:
@@ -83,7 +83,7 @@ Replica 7 counts 2 events. Replica 4000000000 counts 1 event and merges the stat
 
 ```bend
 import Base
-import bend-kit-crdt@0.1.1.0/crdt.bend as Crdt
+import bend-kit-crdt@0.2.0.0/crdt.bend as Crdt
 
 def total(m: Maybe<&2, U32>) -> String:
   match m:

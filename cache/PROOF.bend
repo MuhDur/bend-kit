@@ -1,10 +1,10 @@
 import Base
 import bend-mathlib@0.7.4.0/nat.bend as MNat
 import ./cache.bend as C
-import bend-kit-collections@0.1.3.0/omap.bend as OMap
-import bend-kit-collections@0.1.3.0/order.bend as Order
-import bend-kit-collections@0.1.3.0/LAWS.bend as CL
-import bend-kit-collections@0.1.3.0/PROOF.bend as CP
+import bend-kit-collections@0.1.4.1/omap.bend as OMap
+import bend-kit-collections@0.1.4.1/order.bend as Order
+import bend-kit-collections@0.1.4.1/LAWS.bend as CL
+import bend-kit-collections@0.1.4.1/PROOF.bend as CP
 import ./LAWS.bend as Laws
 
 # Bool and order lemmas

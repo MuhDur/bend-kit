@@ -1,7 +1,7 @@
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
-import bend-kit-hash@0.2.0.0/hash.bend as Hash
-import bend-kit-files@0.2.0.0/files.bend as Files
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import bend-kit-hash@0.3.0.0/hash.bend as Hash
+import bend-kit-files@0.3.0.0/files.bend as Files
 import ./journal.bend as J
 
 def ok(good: Bool, +name: String) -> IO(Unit):
