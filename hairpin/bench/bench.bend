@@ -3,9 +3,9 @@
 import Base
 import ../hairpin.bend as Hairpin
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-http@0.37.0.0/http.bend as Http
-import bend-kit-time@0.2.0.0/time.bend as Time
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-http@0.38.0.0/http.bend as Http
+import bend-kit-time@0.3.0.0/time.bend as Time
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 
 # A failed request scores 0, so it changes the checksum.
 def score(r: Result<&1, &1, Hairpin.Err, Http.Res>) -> U32:
