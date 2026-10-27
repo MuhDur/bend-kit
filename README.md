@@ -94,7 +94,7 @@ Each package README has the import, one example, and the limits that change the 
 | [`protobuf`](protobuf) | `bend-kit-protobuf@0.2.0.0/protobuf.bend` | Pure bounded proto3 messages over `Bytes`, with typed `protoc` code generation. |
 | [`migrate`](migrate) | `bend-kit-migrate@0.3.0.0/migrate.bend` | Versioned subscription records over `Bytes`: validated JSON decode, proved migrations that keep their billing meaning, and a proved encode/decode round trip. |
 | [`tar`](tar) | `bend-kit-tar@0.3.0.0/tar.bend` | POSIX ustar and PAX archives over `Bytes`. |
-| [`archive`](archive) | `bend-kit-archive@0.4.0.0/archive.bend` | ZIP read: stored and DEFLATE entries, checked against CRC-32. |
+| [`archive`](archive) | `bend-kit-archive@0.5.0.0/archive.bend` | ZIP read: stored and DEFLATE entries, checked against CRC-32. |
 | [`zlib`](zlib) | `bend-kit-zlib@0.4.0.0/zlib.bend` | DEFLATE, gzip, and zlib, plus native gzip, zstd, and brotli. |
 | [`crdt`](crdt) | `bend-kit-crdt@0.2.0.0/crdt.bend` | Grow-only counters, keyed by dense indices or sparse IDs, whose merges are proved commutative, associative, idempotent, and convergent. CBOR wire form. |
 
@@ -104,13 +104,13 @@ Each package README has the import, one example, and the limits that change the 
 |---|---|---|
 | [`url`](url) | `bend-kit-url@0.4.1.0/url.bend` | RFC 3986 parse, resolve, and percent-encoding. |
 | [`netip`](netip) | `bend-kit-netip@0.1.0.0/netip.bend` | IPv4, IPv6, and CIDR values. No DNS. |
-| [`dns`](dns) | `bend-kit-dns@0.6.0.4/dns.bend` | DNS codec and host lookup. |
+| [`dns`](dns) | `bend-kit-dns@0.7.0.0/dns.bend` | DNS codec and host lookup. |
 | [`wire`](wire) | `bend-kit-wire@0.4.6.2/wire.bend` | TCP, UDP, and TLS sockets. |
 | [`http`](http) | `bend-kit-http@0.37.0.0/http.bend` | HTTP/1.1 and HTTP/2 client, and an HTTP/1.1 server. |
 | [`http2`](http2) | `bend-kit-http2@0.4.0.0/http2.bend` | RFC 9113 frames and an HTTP/2 client. HPACK is `hpack.bend`. |
 | [`hairpin`](hairpin) | `bend-kit-hairpin@0.12.0.0/hairpin.bend` | An HTTP client: base URL, headers, pool, cookies, redirects, streams, and proven retries with a shared budget, deadlines, and a circuit breaker. |
 | [`retry`](retry) | `bend-kit-retry@0.2.0.0/retry.bend` | A pure retry policy: a shared attempt budget, a deadline, bounded backoff with jitter, and a circuit breaker, with proofs. |
-| [`websocket`](websocket) | `bend-kit-websocket@0.3.0.1/websocket.bend` | RFC 6455 client handshake and frames. |
+| [`websocket`](websocket) | `bend-kit-websocket@0.4.0.0/websocket.bend` | RFC 6455 client handshake and frames. |
 | [`multipart`](multipart) | `bend-kit-multipart@0.3.0.0/multipart.bend` | RFC 7578 form-data encode and decode. |
 
 ### Identity
@@ -129,7 +129,7 @@ Each package README has the import, one example, and the limits that change the 
 | Package | Import | What it does |
 |---|---|---|
 | [`files`](files) | `bend-kit-files@0.3.0.0/files.bend` | POSIX paths, directories, and packed file IO. |
-| [`stream`](stream) | `bend-kit-stream@0.2.0.1/stream.bend` | Bounded copies between files and TCP/TLS sockets. |
+| [`stream`](stream) | `bend-kit-stream@0.3.0.0/stream.bend` | Bounded copies between files and TCP/TLS sockets. |
 | [`process`](process) | `bend-kit-process@0.5.0.0/process.bend` | Commands with a child working directory and byte-exact stdin, stdout, and stderr. |
 | [`collections`](collections) | `bend-kit-collections@0.1.4.1/omap.bend` | Ordered maps, a hash map, a vector, a deque, a heap, and comparators. Import the file you need. |
 | [`time`](time) | `bend-kit-time@0.3.0.0/time.bend` | Clocks, dates, RFC 3339, HTTP-date, and TZif zones. |
