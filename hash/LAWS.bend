@@ -1,5 +1,5 @@
 import Base
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import ./hash.bend as Hash
 
 def b(+s: String) -> Bytes.Bytes:

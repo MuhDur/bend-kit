@@ -8,6 +8,8 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `cbor` 0.3.0.0, `csv` 0.3.0.0, `files` 0.3.0.0, `hash` 0.3.0.0, `http2` 0.4.0.0, `migrate` 0.3.0.0, `multipart` 0.3.0.0, `process` 0.5.0.0, `property` 0.4.0.0, `tar` 0.3.0.0, `time` 0.3.0.0: import `bytes` 0.3.3.0, and `migrate` imports `json` 0.7.0.0 and `encoding` 0.5.0.0. Breaking: `Bytes` and `Json` types come from those versions.
+- `collections` 0.1.4.1: `PROOF.bend` imports `lemmas` 0.1.1.0.
 - `lemmas` 0.1.1.0 and `collections` 0.1.4.0: take Nat and Bool lemmas from `bend-mathlib@0.7.4.0`. Every proof in the kit now imports that one mathlib version.
 - `llm` 0.12.0.0: `stream.close(c, s)` closes a stream through `Hairpin.stream.close` and returns the client, so a stream read to its end gives its connection back to the client's pool. The next `send` or `stream` to the same origin skips the TCP and TLS handshakes. Breaking: `stream.close` takes the client and returns it.
 - `camber` 0.14.0.0, `jwt` 0.10.0.0, `oauth2` 0.10.0.0, and `sigv4` 0.10.0.0: import `http` 0.37.0.0 and, except `camber`, `hairpin` 0.12.0.0. Breaking: `Http` and `Hairpin` types come from those versions.

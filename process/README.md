@@ -3,11 +3,11 @@
 Run an executable with literal arguments and a child working directory. Stdin, stdout, and stderr are byte-exact.
 
 ```bend
-import bend-kit-process@0.4.0.1/process.bend as Proc
-import bend-kit-bytes@0.3.2.0/bytes.bend as Bytes
+import bend-kit-process@0.5.0.0/process.bend as Proc
+import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 ```
 
-`process.bend` imports `bend-kit-bytes@0.3.2.0`. Use this bytes version for `run` input and output.
+`process.bend` imports `bend-kit-bytes@0.3.3.0`. Use this bytes version for `run` input and output.
 
 `run(cmd, args, env, cwd, stdin)` takes the executable name or path, arguments, `KEY=VALUE` environment overrides, the child's working directory, and stdin as `Bytes`. It returns an `IO` result with the exit status, stdout, and stderr, or an error. It does not pass the command to a shell. Thus, `";"` in an argument is data.
 
