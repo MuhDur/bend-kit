@@ -389,12 +389,16 @@ def sip.end(s: S4) -> W64:
   S4{v0, v1, v2, v3} = s
   sip.fin(sip.round(sip.round(sip.round(S4{v0, v1, W64.xor(v2, W64{0, 255}), v3}))))
 
+# The low n bytes of w, for n <= 4, so bytes past len never reach the hash.
+def sip.keep(+w: U32, +n: U32) -> U32:
+  Bool.pick(U32, U32.is_lt(n, 4), (w .&. (U32.shln(1, U32.to_nat((n * 8 : U32))) - 1) : U32), w)
+
 # The last block: the len % 8 bytes left, and len mod 256 in the top byte.
 def sip.last(+len: U32, r: Array<U32> & W64, s: S4) -> Bytes.Bytes & W64:
   (a, W64{+hi, +lo}) = r
   +k = (len .&. 7 : U32)
   +top = ((len .&. 255) << 24n : U32)
-  (Bytes.Bytes{len, a}, sip.end(sip.block(s, W64{(Bool.pick(U32, U32.is_lt(4, k), hi, 0) .|. top : U32), Bool.pick(U32, U32.is_lt(0, k), lo, 0)})))
+  (Bytes.Bytes{len, a}, sip.end(sip.block(s, W64{(sip.keep(hi, Bool.pick(U32, U32.is_lt(4, k), (k - 4 : U32), 0)) .|. top : U32), sip.keep(lo, U32.min(k, 4))})))
 
 def sip.rest(+len: U32, r: Array<U32> & S4) -> Bytes.Bytes & W64:
   (a, s) = r
