@@ -1,6 +1,6 @@
 # f32array
 
-Packed `F32` arrays with affine ownership, one `F32` in each `Array` slot. Use it for model weights, feature rows, and other numeric buffers.
+Packed `F32` arrays with affine ownership. Each `Array` slot is a `Cell` of eight `F32` values, so one array access reads or writes eight elements. Use it for model weights, feature rows, and other numeric buffers.
 
 ```bend
 import Base
@@ -20,9 +20,9 @@ def main() -> IO(Unit):
 
 This package imports `bend-kit-bytes@0.3.3.0` and `bend-kit-files@0.3.0.0`. `from_bytes.le`, `to_bytes.le`, and their `.be` twins take and give that `Bytes.Bytes`.
 
-A call that reads an array returns the array beside its result. Pass that array on. `get` returns `None` when the index is at or past `len`, and `set` then leaves the array unchanged. `map` and `zip_with` write into the array they are given. `zip_with`, `add`, `mul`, and `dot` return `None` when the two lengths differ.
+A call that reads an array returns the array beside its result. Pass that array on. `get` returns `None` when the index is at or past `len`, and `set` then leaves the array unchanged. `map` and `zip_with` write into the array they are given. `zip_with`, `add`, and `mul` give `b` back, and they return `False` with both arrays unchanged when the two lengths differ. `dot` returns `None` when the lengths differ.
 
-`sum`, `dot`, and `fold` work left to right in one pass, so `F32` rounding error grows with the length. NumPy's `sum` adds pairwise and is more accurate on long arrays. `max` uses Base `F32.max`, so a NaN is kept only when it is the first element.
+`sum` and `dot` keep four running sums: element `i` goes to sum `i % 4`, and the result is `(s0 + s1) + (s2 + s3)`. The order is fixed, so every run gives the same bits, but it is not the order of one running sum. Rounding error still grows with the length. NumPy's `sum` adds pairwise and is more accurate on long arrays. `max` keeps four running maxima with Base `F32.max`, all started at `a[0]`, so a NaN is kept only when it is the first element. `fold` goes left to right, one element at a time.
 
 | def | returns |
 |---|---|
@@ -36,8 +36,8 @@ A call that reads an array returns the array beside its result. Pass that array 
 | `concat(xs: List<&1, F32Array>) -> F32Array` | The pieces in order, in one new array. |
 | `map(~f: F32 -> F32, a) -> F32Array` | `f` on each element, in place. |
 | `fold(~A, ~f: A -> F32 -> A, a, init: A) -> F32Array & A` | `f` over the elements from the left. |
-| `zip_with(~f: F32 -> F32 -> F32, a, b) -> Maybe<&1, F32Array>` | `f(a[i], b[i])`, written into `a`. |
-| `add(a, b)`, `mul(a, b) -> Maybe<&1, F32Array>` | `a[i] + b[i]`, `a[i] * b[i]`. |
+| `zip_with(~f: F32 -> F32 -> F32, a, b) -> F32Array & F32Array & Bool` | `f(a[i], b[i])` written into `a`, then `b`, then `True`. |
+| `add(a, b)`, `mul(a, b) -> F32Array & F32Array & Bool` | `a[i] + b[i]` or `a[i] * b[i]`, as for `zip_with`. |
 | `dot(a, b) -> F32Array & F32Array & Maybe<&2, F32>` | Both arrays, and the sum of `a[i] * b[i]`. |
 | `sum(a) -> F32Array & F32` | The sum, from `+0.0`. |
 | `max(a) -> F32Array & Maybe<&2, F32>` | The largest element, or `None` when empty. |
@@ -66,4 +66,4 @@ def main() -> IO(Unit):
     report(got)
 ```
 
-`read.le` and `read.be` call `files` effects. The proofs do not cover them. The laws in `LAWS.bend` are fixtures, because the checker does not run `F32` arithmetic. `check.bend` runs the arithmetic natively on 300,000 elements and reads a file back. Run `scripts/check.sh f32array`.
+`read.le` and `read.be` call `files` effects. The proofs do not cover them. The laws in `LAWS.bend` are fixtures, because the checker does not run `F32` arithmetic. They include arrays that span two cells and check that the lanes past `len` stay `+0.0`. `check.bend` runs the arithmetic natively on 300,003 elements, which ends in a partial cell, and reads a file back. Run `scripts/check.sh f32array`.

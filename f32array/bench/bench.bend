@@ -53,27 +53,29 @@ def last(r: Bytes.Bytes & Maybe<&2, U32>) -> U32:
     case Some{v}:
       v
 
-def op.to_bytes.done(t0: Time.Duration, b: Bytes.Bytes) -> IO(Unit):
+# b rides along so that no timed op frees it.
+def op.to_bytes.done(t0: Time.Duration, b: Bytes.Bytes, keep: A.F32Array) -> IO(Unit):
   Bytes.Bytes{+len, buf} = b
   lap("to_bytes", t0, (len + last(Bytes.get(Bytes.Bytes{len, buf}, (len - 1 : U32))) : U32))
 
-def op.to_bytes(c: A.F32Array) -> IO(Unit):
+def op.to_bytes(c: A.F32Array, keep: A.F32Array) -> IO(Unit):
   do IO<Unit>:
     t0 : Time.Duration <- Time.mono()
-    op.to_bytes.done(t0, A.to_bytes.le(c))
+    op.to_bytes.done(t0, A.to_bytes.le(c), keep)
 
-def op.add.chk(t0: Time.Duration, r: A.F32Array & U32) -> IO(Unit):
+def op.add.chk(t0: Time.Duration, b: A.F32Array, r: A.F32Array & U32) -> IO(Unit):
   (c, +v) = r
   do IO<Unit>:
     lap("add", t0, v)
-    op.to_bytes(c)
+    op.to_bytes(c, b)
 
-def op.add.done(t0: Time.Duration, m: Maybe<&1, A.F32Array>) -> IO(Unit):
-  match m:
-    case None{}:
+def op.add.done(t0: Time.Duration, r: A.F32Array & A.F32Array & Bool) -> IO(Unit):
+  (c, b, ok) = r
+  match ok:
+    case False{}:
       IO.die(Unit, 1, "add: lengths differ")
-    case Some{c}:
-      op.add.chk(t0, ends(c))
+    case True{}:
+      op.add.chk(t0, b, ends(c))
 
 def op.add(a: A.F32Array, b: A.F32Array) -> IO(Unit):
   do IO<Unit>:

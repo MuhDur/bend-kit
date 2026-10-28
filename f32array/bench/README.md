@@ -33,23 +33,25 @@ M4 Pro, macOS, 2026-10-27. Bend 2.0.38, Apple clang 17.0.0 (`-O2`), rustc 1.91.0
 
 | op | C | Rust | Bun | Node | NumPy | Bend |
 |---|---:|---:|---:|---:|---:|---:|
-| from_bytes | 1.35 (3.0x) | 2.24 (5.0x) | 1.79 (4.0x) | 1.46 (3.2x) | 0.45 (1.0x) | 3.49 (7.8x) |
-| sum | 2.39 (4.6x) | 2.50 (4.9x) | 7.42 (14.4x) | 10.77 (20.9x) | 0.51 (1.0x) | 2.49 (4.8x) |
-| max | 2.13 (10.8x) | 0.26 (1.3x) | 4.35 (22.0x) | 5.38 (27.3x) | 0.20 (1.0x) | 12.87 (65.3x) |
-| dot | 2.61 (8.3x) | 2.75 (8.8x) | 24.54 (78.4x) | 25.64 (81.9x) | 0.31 (1.0x) | 2.99 (9.6x) |
-| map | 0.27 (1.0x) | 0.30 (1.1x) | 20.70 (78.1x) | 3.22 (12.2x) | 0.27 (1.0x) | 1.37 (5.2x) |
-| add | 0.36 (1.0x) | 0.36 (1.0x) | 6.38 (17.9x) | 8.14 (22.8x) | 0.37 (1.1x) | 1.62 (4.6x) |
-| to_bytes | 1.28 (4.5x) | 1.26 (4.5x) | 0.28 (1.0x) | 0.39 (1.4x) | 2.52 (8.9x) | 2.22 (7.9x) |
-| geomean vs fastest | 3.4x | 2.8x | 14.6x | 12.9x | 1.4x | 8.9x |
+| from_bytes | 1.26 (2.7x) | 2.15 (4.6x) | 1.84 (3.9x) | 1.54 (3.3x) | 0.46 (1.0x) | 3.66 (7.9x) |
+| sum | 2.12 (4.0x) | 2.53 (4.7x) | 7.54 (14.1x) | 11.16 (20.9x) | 0.53 (1.0x) | 1.15 (2.2x) |
+| max | 1.91 (8.9x) | 0.27 (1.2x) | 4.39 (20.4x) | 5.49 (25.5x) | 0.22 (1.0x) | 3.32 (15.4x) |
+| dot | 2.42 (6.9x) | 2.57 (7.3x) | 25.74 (73.6x) | 25.55 (73.1x) | 0.35 (1.0x) | 1.95 (5.6x) |
+| map | 0.25 (1.0x) | 0.28 (1.1x) | 21.02 (85.1x) | 3.28 (13.3x) | 0.28 (1.1x) | 0.44 (1.8x) |
+| add | 0.34 (1.0x) | 0.37 (1.1x) | 6.36 (18.5x) | 8.51 (24.7x) | 0.37 (1.1x) | 0.45 (1.3x) |
+| to_bytes | 1.11 (3.2x) | 1.56 (4.5x) | 0.34 (1.0x) | 0.61 (1.8x) | 2.49 (7.2x) | 2.13 (6.2x) |
+| geomean vs fastest | 3.0x | 2.7x | 14.5x | 13.3x | 1.4x | 4.1x |
 
 Every program printed checksums `2`, `6291456`, `3`, `14680064`, `4`, `6`, and `16777280`.
 
 ## Reading it
 
-- `sum` and `dot` in Bend match C and Rust. All three add one element at a time in order, because IEEE rules stop the compiler from reordering the adds into SIMD lanes. NumPy adds pairwise with SIMD, and its `dot` calls BLAS, so it is 5 to 10 times faster.
-- `map` and `add` are 4 to 5 times slower than C. Each element costs one `Array.get` and one `Array.set` on Bend's tree array.
-- `max` is the weak spot: 12.9 ms against 2.1 ms in C. A version that matched on `F32.is_lt` instead of calling Base `F32.max` took the same time, so the cost is in the compare, not in `Bool.pick`. This is not confirmed.
-- `from_bytes` and `to_bytes` are one `Array.map` that reinterprets each word. C and JS copy the memory.
+- Each `Array` slot holds a cell of eight elements, so a loop does one array access per eight elements. `sum`, `dot`, and `max` also keep four running values instead of one, so the next add does not wait for the last one. Before these two changes, with one `F32` per slot and one running value, Bend took 2.49 ms for `sum`, 2.99 for `dot`, 12.87 for `max`, 1.37 for `map`, and 1.62 for `add`.
+- `sum` and `dot` now beat the C and Rust loops, which add one element at a time because IEEE rules stop the compiler from reordering the adds. NumPy adds pairwise with SIMD, and its `dot` calls BLAS, so it is still 2 to 6 times faster.
+- `map` and `add` are within 2x of C.
+- A loop that writes cells must not read the next cell ahead. The read-ahead form of `map` took 1.1 ms; reading and writing the same cell in each pass takes 0.3 to 0.4 ms. The read-only loops (`sum`, `dot`, `max`) read ahead without that cost.
+- `max` is the slowest op that is left: 3.3 ms against 1.9 ms in C.
+- `from_bytes` and `to_bytes` move eight words per cell. C and JS copy the memory, so they are 2 to 6 times faster.
 - Every Bend op is one sequential loop. A fork-join split over the array's tree would use every core and give a pairwise sum. It has not been tried.
 
 ## Caveats

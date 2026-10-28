@@ -37,6 +37,18 @@ def lists(m: Maybe<&1, A.F32Array>) -> Maybe<&2, List<&2, F32>>:
     case Some{a}:
       Some{list(a)}
 
+def zipped(r: A.F32Array & A.F32Array & Bool) -> Maybe<&2, List<&2, F32>>:
+  (a, b, ok) = r
+  match ok:
+    case True{}:
+      Some{list(a)}
+    case False{}:
+      None{}
+
+def zipped.both(r: A.F32Array & A.F32Array & Bool) -> List<&2, F32> & List<&2, F32>:
+  (a, b, ok) = r
+  (list(a), list(b))
+
 def folded(r: A.F32Array & List<&2, F32>) -> List<&2, F32>:
   (a, xs) = r
   xs
@@ -55,6 +67,36 @@ def total(r: A.F32Array & F32) -> F32:
 def product(r: A.F32Array & A.F32Array & Maybe<&2, F32>) -> Maybe<&2, F32>:
   (a, b, x) = r
   x
+
+def piece_of(r: A.F32Array & A.F32Array) -> A.F32Array:
+  (a, b) = r
+  b
+
+def from.m(m: Maybe<&1, A.F32Array>) -> A.F32Array:
+  match m:
+    case None{}:
+      A.new(0)
+    case Some{a}:
+      a
+
+def from(b: Bytes.Bytes) -> A.F32Array:
+  from.m(A.from_bytes.le(b))
+
+def cell.of(r: Array<A.Cell> & A.Cell) -> A.Cell:
+  (b, c) = r
+  c
+
+# Cell j of the buffer, past len included.
+def cell(a: A.F32Array, +j: U32) -> A.Cell:
+  A.F32Array{len, buf} = a
+  cell.of(Array.get(A.Cell, buf, j))
+
+def one(x: F32, y: F32) -> F32:
+  1.0
+
+def zipped.cell(r: A.F32Array & A.F32Array & Bool) -> A.Cell:
+  (a, b, ok) = r
+  cell(a, 0)
 
 def wire(b: Bytes.Bytes) -> String:
   Bytes.to_string(b)
@@ -77,6 +119,13 @@ def keep(x: F32, y: F32) -> F32:
 
 def push(xs: List<&2, F32>, x: F32) -> List<&2, F32>:
   Con{x, xs}
+
+# Eleven elements span two cells: eight, then three.
+def eleven() -> List<&2, F32>:
+  [1.0, 2.5, neg2(), 0.5, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+
+def flipped() -> List<&2, F32>:
+  [neg1(), A.of_bits(3223322624), 2.0, neghalf(), A.of_bits(3225419776), A.of_bits(3229614080), A.of_bits(3231711232), A.of_bits(3233808384), A.of_bits(3235905536), A.of_bits(3238002688), A.of_bits(3239051264)]
 
 law new_zeros:
   {list(A.new(3)) == [0.0, 0.0, 0.0] : List<&2, F32>}
@@ -126,9 +175,9 @@ law concat_none:
 law map_each:
   {list(A.map(~flip, of([1.0, neg2(), 0.5]))) == [neg1(), 2.0, neghalf()] : List<&2, F32>}
 
-# The slot past len stays +0.0, so the bytes end where the elements end.
+# The lanes past len stay +0.0, so sum and dot can add whole cells.
 law map_keeps_tail:
-  {wire(A.to_bytes.le(A.map(~flip, A.new(3)))) == octets([0, 0, 0, 128, 0, 0, 0, 128, 0, 0, 0, 128]) : String}
+  {cell(A.map(~flip, A.new(3)), 0) == A.Cell{A.of_bits(2147483648), A.of_bits(2147483648), A.of_bits(2147483648), 0.0, 0.0, 0.0, 0.0, 0.0} : A.Cell}
 
 law fold_order:
   {folded(A.fold(~List<&2, F32>, ~push, of([1.0, 2.5, neg2()]), [])) == [neg2(), 2.5, 1.0] : List<&2, F32>}
@@ -137,25 +186,22 @@ law fold_empty:
   {folded(A.fold(~List<&2, F32>, ~push, of([]), [0.5])) == [0.5] : List<&2, F32>}
 
 law zip_pairs:
-  {lists(A.zip_with(~keep, of([1.0, 2.5]), of([neg2(), 0.5]))) == Some{[neg2(), 0.5]} : Maybe<&2, List<&2, F32>>}
+  {zipped(A.zip_with(~keep, of([1.0, 2.5]), of([neg2(), 0.5]))) == Some{[neg2(), 0.5]} : Maybe<&2, List<&2, F32>>}
 
 law zip_mismatch:
-  {lists(A.zip_with(~keep, of([1.0, 2.5]), of([neg2()]))) == None{} : Maybe<&2, List<&2, F32>>}
+  {zipped.both(A.zip_with(~keep, of([1.0, 2.5]), of([neg2()]))) == ([1.0, 2.5], [neg2()]) : List<&2, F32> & List<&2, F32>}
+
+law zip_gives_b_back:
+  {zipped.both(A.zip_with(~keep, of([1.0, 2.5]), of([neg2(), 0.5]))) == ([neg2(), 0.5], [neg2(), 0.5]) : List<&2, F32> & List<&2, F32>}
 
 law add_mismatch:
-  {lists(A.add(of([1.0]), of([]))) == None{} : Maybe<&2, List<&2, F32>>}
+  {zipped(A.add(of([1.0]), of([]))) == None{} : Maybe<&2, List<&2, F32>>}
 
 law mul_mismatch:
-  {lists(A.mul(of([]), of([1.0]))) == None{} : Maybe<&2, List<&2, F32>>}
-
-law sum_empty:
-  {total(A.sum(of([]))) == 0.0 : F32}
+  {zipped(A.mul(of([]), of([1.0]))) == None{} : Maybe<&2, List<&2, F32>>}
 
 law max_empty:
   {value(A.max(of([]))) == None{} : Maybe<&2, F32>}
-
-law dot_empty:
-  {product(A.dot(of([]), of([]))) == Some{0.0} : Maybe<&2, F32>}
 
 law dot_mismatch:
   {product(A.dot(of([1.0]), of([1.0, 2.5]))) == None{} : Maybe<&2, F32>}
@@ -184,3 +230,50 @@ law bytes_roundtrip_le:
 
 law bytes_roundtrip_be:
   {lists(A.from_bytes.be(A.to_bytes.be(of([1.0, 2.5, neg2(), 0.5, 3.0])))) == Some{[1.0, 2.5, neg2(), 0.5, 3.0]} : Maybe<&2, List<&2, F32>>}
+
+law cells_roundtrip:
+  {list(of(eleven())) == eleven() : List<&2, F32>}
+
+law get_second_cell:
+  {at(of(eleven()), 9) == Some{8.0} : Maybe<&2, F32>}
+
+law get_past_len_in_cell:
+  {at(of(eleven()), 11) == None{} : Maybe<&2, F32>}
+
+law set_second_cell:
+  {list(A.set(of(eleven()), 8, 0.5)) == [1.0, 2.5, neg2(), 0.5, 3.0, 4.0, 5.0, 6.0, 0.5, 8.0, 9.0] : List<&2, F32>}
+
+law slice_aligned:
+  {piece(A.slice(of(eleven()), 8, 2)) == [7.0, 8.0] : List<&2, F32>}
+
+law slice_across_cells:
+  {piece(A.slice(of(eleven()), 5, 5)) == [4.0, 5.0, 6.0, 7.0, 8.0] : List<&2, F32>}
+
+# An aligned slice moves whole cells, so its last cell must lose the lanes past its len.
+law slice_aligned_tail:
+  {cell(piece_of(A.slice(of(eleven()), 0, 2)), 0) == A.Cell{1.0, 2.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} : A.Cell}
+
+law concat_cells:
+  {list(A.concat([of([1.0, 2.5, neg2(), 0.5, 3.0, 4.0, 5.0, 6.0]), of([7.0, 8.0]), of([9.0])])) == eleven() : List<&2, F32>}
+
+law map_cells:
+  {list(A.map(~flip, of(eleven()))) == flipped() : List<&2, F32>}
+
+law fold_cells:
+  {folded(A.fold(~List<&2, F32>, ~push, of(eleven()), [])) == [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 0.5, neg2(), 2.5, 1.0] : List<&2, F32>}
+
+law zip_cells:
+  {zipped(A.zip_with(~keep, of(eleven()), A.map(~flip, of(eleven())))) == Some{flipped()} : Maybe<&2, List<&2, F32>>}
+
+law zip_keeps_tail:
+  {zipped.cell(A.zip_with(~one, of([2.0, 3.0]), of([4.0, 5.0]))) == A.Cell{1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} : A.Cell}
+
+law bytes_cells_le:
+  {lists(A.from_bytes.le(A.to_bytes.le(of(eleven())))) == Some{eleven()} : Maybe<&2, List<&2, F32>>}
+
+law bytes_cells_be:
+  {lists(A.from_bytes.be(A.to_bytes.be(of(eleven())))) == Some{eleven()} : Maybe<&2, List<&2, F32>>}
+
+# 3 elements use 3 of a 4-word Bytes buffer; the cell's reads past the words wrap around and must not leak in.
+law from_bytes_tail:
+  {cell(from(Bytes.from_string(octets([0, 0, 128, 63, 0, 0, 0, 192, 0, 0, 32, 64]))), 0) == A.Cell{1.0, neg2(), 2.5, 0.0, 0.0, 0.0, 0.0, 0.0} : A.Cell}

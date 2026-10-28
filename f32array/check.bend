@@ -38,6 +38,14 @@ def at(m: Maybe<&1, A.F32Array>, +i: U32) -> Maybe<&2, F32>:
     case Some{a}:
       value(A.get(a, i))
 
+def zipped(r: A.F32Array & A.F32Array & Bool, +i: U32) -> Maybe<&2, F32>:
+  (a, b, ok) = r
+  match ok:
+    case True{}:
+      value(A.get(a, i))
+    case False{}:
+      None{}
+
 def ramp.go(n: Nat, a: A.F32Array, +i: U32, +k: U32) -> A.F32Array:
   match n:
     case 0n:
@@ -51,6 +59,12 @@ def ramp(+n: U32, +k: U32) -> A.F32Array:
 
 def twice(x: F32) -> F32:
   (x * 2.0 : F32)
+
+def plus1(x: F32) -> F32:
+  (x + 1.0 : F32)
+
+def neg(x: F32) -> F32:
+  F32.neg(x)
 
 def big.sum(+n: U32) -> F32:
   total(A.sum(ramp(n, 1)))
@@ -74,18 +88,25 @@ def loaded(r: File & Result<&1, &1, U32 & String, A.F32Array>) -> IO(A.F32Array)
     IO.try(A.F32Array, IO.pure(Result<&1, &1, U32 & String, A.F32Array>, x))
 
 def main() -> IO(Unit):
-  +n = {300000 : U32}
+  +n = {300003 : U32}
   do IO<Unit>:
-    expect("add", has(at(A.add(A.from_list([1.0, 2.5]), A.from_list([0.5, 0.25])), 1), 2.75))
-    expect("mul", has(at(A.mul(A.from_list([1.5, 2.0]), A.from_list([2.0, 0.25])), 0), 3.0))
+    expect("add", has(zipped(A.add(A.from_list([1.0, 2.5]), A.from_list([0.5, 0.25])), 1), 2.75))
+    expect("mul", has(zipped(A.mul(A.from_list([1.5, 2.0]), A.from_list([2.0, 0.25])), 0), 3.0))
     expect("sum", F32.is_eq(total(A.sum(A.from_list([1.0, 2.5, 0.5]))), 4.0))
     expect("dot", has(product(A.dot(A.from_list([1.0, 2.0, 3.0]), A.from_list([4.0, 5.0, 6.0]))), 32.0))
     expect("max", has(value(A.max(A.from_list([1.0, 7.5, 2.0]))), 7.5))
+    expect("sum_empty", F32.is_eq(total(A.sum(A.new(0))), 0.0))
+    expect("dot_empty", has(product(A.dot(A.new(0), A.new(0))), 0.0))
+    expect("sum_partial", F32.is_eq(total(A.sum(A.map(~plus1, A.new(11)))), 11.0))
+    expect("max_negative", has(value(A.max(A.map(~neg, A.from_list([3.0, 1.0, 2.0, 5.0, 4.0, 6.0, 7.0, 9.0, 8.0, 2.5])))), F32.neg(1.0)))
+    expect("max_tail", has(value(A.max(A.map(~neg, A.from_list([3.0, 4.0, 2.0, 5.0, 4.0, 6.0, 7.0, 9.0, 8.0, 0.5])))), F32.neg(0.5)))
+    expect("max_full_cell", has(value(A.max(A.map(~neg, A.from_list([3.0, 4.0, 2.0, 5.0, 4.0, 0.25, 7.0, 9.0])))), F32.neg(0.25)))
+    expect("big_max", has(value(A.max(ramp(n, 1))), 7.0))
     expect("max_one", has(value(A.max(A.from_list([0.25]))), 0.25))
-    # 37500 runs of 0..7 sum to 1050000; the dot product is 37500 * 108.
-    expect("big_sum", F32.is_eq(big.sum(n), 1050000.0))
-    expect("big_dot", has(big.dot(n), 4050000.0))
-    expect("big_roundtrip", has(big.roundtrip(n), 4.0))
+    # n is not a multiple of 8, so the last cell is partial; every sum is an exact integer.
+    expect("big_sum", F32.is_eq(big.sum(n), 1050012.0))
+    expect("big_dot", has(big.dot(n), 4050034.0))
+    expect("big_roundtrip", has(big.roundtrip(n), 10.0))
     +dir : String <- IO.try(String, Files.temp_dir())
     +path : String = dir ++ "/f32.bin"
     w : File <- IO.try(File, File.open(path, "w"))
@@ -94,7 +115,7 @@ def main() -> IO(Unit):
     r : File <- IO.try(File, File.open(path, "r"))
     got : File & Result<&1, &1, U32 & String, A.F32Array> <- A.read.le(r)
     a : A.F32Array <- loaded(got)
-    expect("read_le", F32.is_eq(total(A.sum(a)), 1050000.0))
+    expect("read_le", F32.is_eq(total(A.sum(a)), 1050012.0))
     rm1 : Unit <- IO.try(Unit, Files.remove(path))
     rm2 : Unit <- IO.try(Unit, Files.remove(dir))
     return Unit{}
