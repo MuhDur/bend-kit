@@ -276,6 +276,7 @@ def cd.lit(ok: Bool, h: Bits.Huff, b: Br, acc: List<&2, U32>, +n: U32, +prev: U3
     case False{}:
       cd.c16(U32.is_eq(s, 16), h, b, acc, n, prev, s, total)
 
+# A + binder in a nested tuple does not check (bendlang/bend#1077), so a helper takes it.
 def cd.sym.at(h: Bits.Huff, b: Br, +s: U32, acc: List<&2, U32>, +n: U32, +prev: U32, +total: U32) -> Cd:
   cd.lit(U32.is_lt(s, 16), h, b, acc, n, prev, s, total)
 
@@ -390,6 +391,7 @@ def inf.ds(ok: Bool, lit: Bits.Huff, dist: Bits.Huff, b: Br, +ds: U32, +len: U32
     case True{}:
       inf.dx(br.take(b, nth(dist.extra(), ds)), nth(dist.base(), ds), len, lit, dist, o, last)
 
+# A + binder in a nested tuple does not check (bendlang/bend#1077), so a helper takes it.
 def inf.d.at(dist: Bits.Huff, b: Br, +ds: U32, +len: U32, lit: Bits.Huff, o: Out, +last: Bool) -> Is:
   inf.ds(U32.is_lt(ds, 30), lit, dist, b, ds, len, o, last)
 
@@ -423,6 +425,7 @@ def inf.lit(ok: Bool, lit: Bits.Huff, dist: Bits.Huff, b: Br, +s: U32, o: Out, +
     case False{}:
       inf.end(U32.is_eq(s, 256), lit, dist, b, s, o, last)
 
+# A + binder in a nested tuple does not check (bendlang/bend#1077), so a helper takes it.
 def inf.sym.at(lit: Bits.Huff, b: Br, +s: U32, dist: Bits.Huff, o: Out, +last: Bool) -> Is:
   inf.lit(U32.is_lt(s, 256), lit, dist, b, s, o, last)
 
