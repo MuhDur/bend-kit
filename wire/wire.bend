@@ -32,6 +32,12 @@ def send(sock: Socket, data: String) ->
   import "./effs/wire.c"
   import "./effs/wire.js"
 
+# True when no byte and no end of stream waits on sock; it reads nothing.
+# False on an idle connection means the peer closed it or is out of step.
+def idle(sock: Socket) -> IO(Socket & Bool):
+  import "./effs/wire.c"
+  import "./effs/wire.js"
+
 def recv_from(sock: Socket, max: U32, ms: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, String & U32 & String>):
   import "./effs/wire.c"

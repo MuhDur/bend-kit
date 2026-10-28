@@ -184,6 +184,14 @@ function wire_recv(socket, max, ms, k, out) {
   return go();
 }
 
+// MSG_PEEK | MSG_DONTWAIT; MSG_PEEK leaves a waiting byte for the next read.
+function idle(socket) {
+  const sys = io_sys();
+  const b = new Uint8Array(1);
+  const n = Number(sys.recv(socket, sys.ptr(b), 1, sys.mac ? 0x82 : 0x42));
+  return io_tup(socket, n < 0 && sys.errno() === (sys.mac ? 35 : 11));
+}
+
 
 function send(socket, data, k) {
   return wire_send(socket, wire_octets(data), k);
@@ -708,6 +716,7 @@ function connect(host, port, ms, k) {
 io_eff(CID(connect), connect);
 io_eff(CID(accept.deadline), accept_deadline);
 io_eff(CID(recv), recv);
+io_eff(CID(idle), idle);
 io_eff(CID(send), send);
 io_eff(CID(recv_from), recv_from);
 io_eff(CID(send_to), send_to);

@@ -177,6 +177,54 @@ def udp6.check() -> IO(Unit):
     r : Result<&1, &1, U32 & String, Socket & U32> <- test.udp6(0)
     udp6.opened(r)
 
+def idle.closed(m: Socket & Bool) -> IO(Unit):
+  (s, +quiet) = m
+  do IO<Unit>:
+    ok(Bool.not(quiet), "idle sees the peer close", "True")
+    Socket.close(s)
+
+def idle.open(server: Socket, m: Socket & Bool) -> IO(Unit):
+  (s, +quiet) = m
+  do IO<Unit>:
+    ok(quiet, "idle on an open socket", "False")
+    Socket.close(server)
+    IO.sleep(50)
+    closed : Socket & Bool <- Wire.idle(s)
+    idle.closed(closed)
+
+def idle.accepted(client: Socket, m: Listener & Result<&1, &1, U32 & String, Socket>) -> IO(Unit):
+  match m:
+    case (l, Fail{(+code, why)}):
+      IO.die(Unit, 1, "idle accept: " ++ U32.show(code) ++ " " ++ why)
+    case (l, Done{server}):
+      do IO<Unit>:
+        Listener.close(l)
+        open : Socket & Bool <- Wire.idle(client)
+        idle.open(server, open)
+
+def idle.connected(l: Listener, r: Result<&1, &1, U32 & String, Socket>) -> IO(Unit):
+  match r:
+    case Fail{(+code, why)}:
+      IO.die(Unit, 1, "idle connect: " ++ U32.show(code) ++ " " ++ why)
+    case Done{s}:
+      do IO<Unit>:
+        accepted : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
+        idle.accepted(s, accepted)
+
+def idle.listener(r: Result<&1, &1, U32 & String, Listener & U32>) -> IO(Unit):
+  match r:
+    case Fail{(+code, why)}:
+      IO.die(Unit, 1, "idle listen: " ++ U32.show(code) ++ " " ++ why)
+    case Done{(l, +port)}:
+      do IO<Unit>:
+        r : Result<&1, &1, U32 & String, Socket> <- Wire.connect("::1", port, 5000)
+        idle.connected(l, r)
+
+def idle.check() -> IO(Unit):
+  do IO<Unit>:
+    l : Result<&1, &1, U32 & String, Listener & U32> <- test.listen6(0)
+    idle.listener(l)
+
 # EPROTO is 100 on macOS and 71 on Linux.
 def mtls.no_cert(m: Socket & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
   match m:
@@ -255,5 +303,6 @@ def main() -> IO(Unit):
   do IO<Unit>:
     ipv6.check()
     udp6.check()
+    idle.check()
     args : List<&1, String> <- IO.args()
     mtls.args(List.tail(&1, String, args))
