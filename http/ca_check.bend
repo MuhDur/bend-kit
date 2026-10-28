@@ -117,42 +117,42 @@ def upload.fail(r: Result<&1, &1, Http.Err, Http.Up>) -> IO(Unit):
     case Fail{e}:
       stream.fail("upload.how default store rejects private CA", 100, (None{}, Fail{e}))
 
-def run(+ca: String) -> IO(Unit):
+def run(+ca: String, +base: String) -> IO(Unit):
   do IO<Unit>:
     ok : Result<&1, &1, Http.Err, Http.Res> <-
-      Http.fetch.ca("GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), ca)
+      Http.fetch.ca("GET", base ++ "/ok", Http.empty(), Http.from_string(""), ca)
     body.ok("fetch.ca", "ok", ok)
     gone : Result<&1, &1, Http.Err, Http.Res> <-
-      Http.fetch.ca("GET", "https://localhost:39446/go", Http.empty(), Http.from_string(""), ca)
+      Http.fetch.ca("GET", base ++ "/go", Http.empty(), Http.from_string(""), ca)
     body.ok("fetch.ca redirect", "ok", gone)
     bare : Result<&1, &1, Http.Err, Http.Res> <-
-      Http.fetch("GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""))
+      Http.fetch("GET", base ++ "/ok", Http.empty(), Http.from_string(""))
     tls.fail("default store rejects private CA", 100, bare)
     missing : Result<&1, &1, Http.Err, Http.Res> <-
-      Http.fetch.ca("GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), "/nonexistent/bend-kit-ca.pem")
+      Http.fetch.ca("GET", base ++ "/ok", Http.empty(), Http.from_string(""), "/nonexistent/bend-kit-ca.pem")
     tls.fail("missing CA file", 22, missing)
     pooled : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
-      Http.pool.fetch.ca(Http.pool.new(), "GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), ca)
+      Http.pool.fetch.ca(Http.pool.new(), "GET", base ++ "/ok", Http.empty(), Http.from_string(""), ca)
     pool.ok(pooled)
     opened : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeFollow{}, None{}, ca, None{}, "GET", "https://localhost:39446/go", Http.empty(), Http.from_string(""), 30000)
+      Http.open.how(Http.ModeFollow{}, None{}, ca, None{}, "GET", base ++ "/go", Http.empty(), Http.from_string(""), 30000)
     stream.ok("open.how ca redirect", opened)
     plain : Maybe<&2, Http.Jar> & Result<&1, &1, Http.Err, Http.Stream> <-
-      Http.open.how(Http.ModeFollow{}, None{}, "", None{}, "GET", "https://localhost:39446/ok", Http.empty(), Http.from_string(""), 30000)
+      Http.open.how(Http.ModeFollow{}, None{}, "", None{}, "GET", base ++ "/ok", Http.empty(), Http.from_string(""), 30000)
     stream.fail("open.how default store rejects private CA", 100, plain)
     uploaded : Result<&1, &1, Http.Err, Http.Up> <-
-      Http.upload.how(None{}, ca, "POST", "https://localhost:39446/ok", Http.empty(), 30000)
+      Http.upload.how(None{}, ca, "POST", base ++ "/ok", Http.empty(), 30000)
     upload.ok(uploaded)
     refused : Result<&1, &1, Http.Err, Http.Up> <-
-      Http.upload.how(None{}, "", "POST", "https://localhost:39446/ok", Http.empty(), 30000)
+      Http.upload.how(None{}, "", "POST", base ++ "/ok", Http.empty(), 30000)
     upload.fail(refused)
 
 def main.args(args: List<&1, String>) -> IO(Unit):
   match args:
-    case Con{ca, Nil{}}:
-      run(ca)
+    case Con{ca, Con{base, Nil{}}}:
+      run(ca, base)
     case _:
-      die("ca_check needs a CA file path")
+      die("ca_check needs a CA file path and the server base URL")
 
 def main() -> IO(Unit):
   do IO<Unit>:
