@@ -994,7 +994,7 @@ def words.got(r: Result<&1, &1, U32 & String, U32 & Array<U32>>) -> Result<&1, &
     case Done{(+len, buf)}:
       Done{Bytes.Bytes{len, buf}}
 
-def words.run(~eff: U32 -> U32 -> Array<U32> -> IO(Result<&1, &1, U32 & String, U32 & Array<U32>>), +max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
+def words.run(~eff: U32 -> U32 -> Array<U32> -> IO(Result<&1, &1, U32 & String, U32 & Array<U32>>), max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
   Bytes.Bytes{+len, buf} = b
   do IO<Result<&1, &1, U32 & String, Bytes.Bytes>>:
     r : Result<&1, &1, U32 & String, U32 & Array<U32>> <- eff(max, len, buf)
@@ -1002,11 +1002,11 @@ def words.run(~eff: U32 -> U32 -> Array<U32> -> IO(Result<&1, &1, U32 & String, 
 
 # gzip, zlib, or raw DEFLATE data through libz, selected from the first two bytes. Every gzip member is decoded in turn, as gzip -d does.
 # Each decoder fails with EFBIG when the output passes max bytes, and ENOENT without its library.
-def libz.inflate(+max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
+def libz.inflate(max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
   words.run(~inflate.words, max, b)
 
 # One raw DEFLATE stream through libz. Trailing bytes, truncated input and output above max fail.
-def libz.inflate.raw(+max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
+def libz.inflate.raw(max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
   words.run(~inflate.raw.words, max, b)
 
 # One gzip member at level 6 through libz.
@@ -1017,11 +1017,11 @@ def libz.gzip(b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
     return words.got(r)
 
 # Zstandard frames (RFC 8878) through libzstd.
-def zstd(+max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
+def zstd(max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
   words.run(~zstd.words, max, b)
 
 # Brotli (RFC 7932) through libbrotlidec.
-def brotli(+max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
+def brotli(max: U32, b: Bytes.Bytes) -> IO(Result<&1, &1, U32 & String, Bytes.Bytes>):
   words.run(~brotli.words, max, b)
 
 # A live native decoder. Call dec.finish even after a failed feed to release it.
@@ -1059,7 +1059,7 @@ def dec.feed(id: U32, max: U32, len: U32, words: Array<U32>) ->
   import "./effs/zlib.js"
 
 # The output of one chunk of input. max caps this call, not the total output of the stream.
-def dec.push(d: Decoder, +max: U32, b: Bytes.Bytes) ->
+def dec.push(d: Decoder, max: U32, b: Bytes.Bytes) ->
   IO(Decoder & Result<&1, &1, U32 & String, Bytes.Bytes>):
   Decoder{+id} = d
   Bytes.Bytes{+len, buf} = b
