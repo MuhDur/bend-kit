@@ -1,10 +1,10 @@
 import Base
 import ./sse.bend as Sse
 import ./llm.bend as Llm
-import bend-kit-hairpin@0.13.0.0/hairpin.bend as Hairpin
-import bend-kit-http@0.38.0.0/http.bend as Http
-import bend-kit-http@0.38.0.0/admission.bend as Admission
-import bend-kit-http@0.38.0.0/completion.bend as Completion
+import bend-kit-hairpin@0.13.0.1/hairpin.bend as Hairpin
+import bend-kit-http@0.38.1.1/http.bend as Http
+import bend-kit-http@0.38.1.1/admission.bend as Admission
+import bend-kit-http@0.38.1.1/completion.bend as Completion
 import bend-kit-json@0.7.0.0/json.bend as Json
 import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 
