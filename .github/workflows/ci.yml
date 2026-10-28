@@ -33,8 +33,14 @@ jobs:
       - name: Check sibling pins
         if: github.event_name == 'pull_request'
         run: |
-          pkgs=$(scripts/packages.sh "origin/${{ github.base_ref }}")
-          [ -z "$pkgs" ] || scripts/pins.sh "origin/${{ github.base_ref }}" $pkgs
+          base="origin/${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base"...HEAD)
+          if grep -qxE 'scripts/(pins|packages)\.sh' <<<"$changed"; then
+            scripts/pins.sh "$base"
+          else
+            pkgs=$(cut -d/ -f1 <<<"$changed" | sort -u | grep -xFf <(scripts/packages.sh) || true)
+            [ -z "$pkgs" ] || scripts/pins.sh "$base" $pkgs
+          fi
 
   check:
     needs: changes
