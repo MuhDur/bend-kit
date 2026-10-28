@@ -1,22 +1,25 @@
+import os
 import ssl
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-ca, chain, key = sys.argv[1:4]
+ca, chain, key, ports_path = sys.argv[1:5]
+ports = []
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def do_GET(self):
         port = self.server.server_port
-        if port == 39444 and self.path == '/same':
-            status, body, location = 302, b'', 'https://localhost:39444/who'
-        elif port == 39444 and self.path in ('/cross', '/back'):
-            status, body, location = 302, b'', 'https://localhost:39445/' + ('inspect' if self.path == '/cross' else 'back')
-        elif port == 39445 and self.path == '/back':
-            status, body, location = 302, b'', 'https://localhost:39444/who'
-        elif port == 39445:
+        required, optional = ports
+        if port == required and self.path == '/same':
+            status, body, location = 302, b'', f'https://localhost:{required}/who'
+        elif port == required and self.path in ('/cross', '/back'):
+            status, body, location = 302, b'', f'https://localhost:{optional}/' + ('inspect' if self.path == '/cross' else 'back')
+        elif port == optional and self.path == '/back':
+            status, body, location = 302, b'', f'https://localhost:{required}/who'
+        elif port == optional:
             status, body, location = 200, b'leaked' if self.connection.getpeercert() else b'clean', None
         else:
             cert = self.connection.getpeercert()
@@ -32,8 +35,9 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-for port, required in ((39444, True), (39445, False)):
-    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+for required in (True, False):
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    ports.append(server.server_port)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(chain, key)
@@ -42,4 +46,7 @@ for port, required in ((39444, True), (39445, False)):
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
+with open(ports_path + '.tmp', 'w') as f:
+    f.write(' '.join(map(str, ports)) + '\n')
+os.replace(ports_path + '.tmp', ports_path)
 threading.Event().wait()

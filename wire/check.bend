@@ -52,6 +52,11 @@ def test.listen6(port: U32) -> IO(Result<&1, &1, U32 & String, Listener & U32>):
   import "./effs/ipv6_test.c"
   import "./effs/ipv6_test.js"
 
+# The shared test twin also declares this IPv4 listener effect.
+def test.listen4(port: U32) -> IO(Result<&1, &1, U32 & String, Listener & U32>):
+  import "./effs/ipv6_test.c"
+  import "./effs/ipv6_test.js"
+
 def ipv6.got(m: Socket & Result<&1, &1, U32 & String, String>) -> IO(Unit):
   match m:
     case (s, Fail{(+code, why)}):
