@@ -47,7 +47,7 @@ The effects load these libraries at run time. Set the override when the library 
 | Library | Used by | Override |
 |---|---|---|
 | OpenSSL 3 `libssl` | `wire` TLS, HTTPS in `http` and `hairpin` | `BEND_LIBSSL` |
-| OpenSSL 3 `libcrypto` | `crypto`, and signing or secure random through it | `BEND_LIBCRYPTO` |
+| OpenSSL 3 `libcrypto` | `crypto`, and signing through it | `BEND_LIBCRYPTO` |
 | `libsqlite3` | `sqlite` | `BEND_LIBSQLITE` |
 | `libz` | `zlib` inflate and gzip, `archive` DEFLATE, `http` gzip | `BEND_LIBZ` |
 | `libzstd` | `zlib` and `http` zstd | `BEND_LIBZSTD` |
@@ -118,7 +118,7 @@ Each package README has the import, one example, and the limits that change the 
 
 | Package | Import | What it does |
 |---|---|---|
-| [`crypto`](crypto) | `bend-kit-crypto@0.2.2.1/crypto.bend` | Digests, HMAC, HKDF, AEAD, scrypt, RSA, and P-256 through OpenSSL 3. |
+| [`crypto`](crypto) | `bend-kit-crypto@0.2.2.2/crypto.bend` | Digests, HMAC, HKDF, AEAD, scrypt, RSA, and P-256 through OpenSSL 3. |
 | [`oauth2`](oauth2) | `bend-kit-oauth2@0.11.0.0/oauth2.bend` | Client credentials, refresh, and authorization code with PKCE. |
 | [`authz`](authz) | `bend-kit-authz@0.1.0.0/authz.bend` | Pure authorization policies: deny-overrides, default deny, intersection, and fail-closed missing context. |
 | [`jwt`](jwt) | `bend-kit-jwt@0.11.0.0/jwt.bend` | HS256/384/512, RS256, and ES256, plus JWKS lookup. |
