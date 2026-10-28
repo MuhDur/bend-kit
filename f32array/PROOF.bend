@@ -1,0 +1,108 @@
+import Base
+import ./f32array.bend as A
+import ./LAWS.bend as Laws
+
+def Laws.new_zeros():
+  {==}
+
+def Laws.new_empty():
+  {==}
+
+def Laws.length_of():
+  {==}
+
+def Laws.list_roundtrip():
+  {==}
+
+def Laws.get_in():
+  {==}
+
+def Laws.get_past_len():
+  {==}
+
+def Laws.get_after_set():
+  {==}
+
+def Laws.set_keeps_others():
+  {==}
+
+def Laws.set_past_len():
+  {==}
+
+def Laws.slice_middle():
+  {==}
+
+def Laws.slice_keeps_source():
+  {==}
+
+def Laws.slice_clamps_count():
+  {==}
+
+def Laws.slice_clamps_start():
+  {==}
+
+def Laws.concat_pieces():
+  {==}
+
+def Laws.concat_none():
+  {==}
+
+def Laws.map_each():
+  {==}
+
+def Laws.map_keeps_tail():
+  {==}
+
+def Laws.fold_order():
+  {==}
+
+def Laws.fold_empty():
+  {==}
+
+def Laws.zip_pairs():
+  {==}
+
+def Laws.zip_mismatch():
+  {==}
+
+def Laws.add_mismatch():
+  {==}
+
+def Laws.mul_mismatch():
+  {==}
+
+def Laws.sum_empty():
+  {==}
+
+def Laws.max_empty():
+  {==}
+
+def Laws.dot_empty():
+  {==}
+
+def Laws.dot_mismatch():
+  {==}
+
+def Laws.to_bytes_le():
+  {==}
+
+def Laws.to_bytes_be():
+  {==}
+
+def Laws.from_bytes_le():
+  {==}
+
+def Laws.from_bytes_be():
+  {==}
+
+def Laws.from_bytes_unaligned():
+  {==}
+
+def Laws.from_bytes_empty():
+  {==}
+
+def Laws.bytes_roundtrip_le():
+  {==}
+
+def Laws.bytes_roundtrip_be():
+  {==}
