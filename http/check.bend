@@ -8,6 +8,7 @@ import bend-kit-http2@0.4.0.0/hpack.bend as Hpack
 import bend-kit-http2@0.4.0.0/http2.bend as H2
 import bend-kit-bytes@0.3.3.0/bytes.bend as HBytes
 import bend-kit-time@0.3.0.0/time.bend as Time
+import bend-kit-wire@0.4.7.0/wire.bend as Wire
 
 
 def show_req(req: Http.Req) -> IO(Unit):
@@ -730,6 +731,84 @@ def spool.test() -> IO(Unit):
     p3 : Http.Pool <- spool.early(c)
     spool.left(Http.pool.take(p3, Http.pool.key("http", "127.0.0.1", 47818)))
 
+def stale.srv.closed(sent: Socket & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
+  (s, r) = sent
+  Socket.close(s)
+
+def stale.srv.reply(+want: String, +body: String, got: Socket & Result<&1, &1, U32 & String, String>) -> IO(Unit):
+  match got:
+    case (s, Fail{(+code, why)}):
+      do IO<Unit>:
+        Socket.close(s)
+        IO.die(Unit, 1, "stale pool: server recv: " ++ why)
+    case (s, Done{+req}):
+      do IO<Unit>:
+        local.ok(String.starts_with(req, want), "stale pool: server got " ++ want)
+        sent : Socket & Result<&1, &1, U32 & String, Unit> <-
+          Wire.send(s, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n" ++ body)
+        stale.srv.closed(sent)
+
+def stale.srv.one(+want: String, +body: String, a: Listener & Result<&1, &1, U32 & String, Socket>) -> IO(Listener):
+  match a:
+    case (l, Fail{(+code, why)}):
+      IO.die(Listener, 1, "stale pool: accept: " ++ why)
+    case (l, Done{s}):
+      do IO<Listener>:
+        got : Socket & Result<&1, &1, U32 & String, String> <- Wire.recv(s, 4096, 2000)
+        stale.srv.reply(want, body, got)
+        return l
+
+# Each connection answers one request, keeps the connection alive in its reply, then closes it.
+def stale.serve(l: Listener) -> IO(Unit):
+  do IO<Unit>:
+    a : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l)
+    l1 : Listener <- stale.srv.one("GET ", "a", a)
+    b : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l1)
+    l2 : Listener <- stale.srv.one("POST ", "b", b)
+    c : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(l2)
+    l3 : Listener <- stale.srv.one("POST ", "c", c)
+    Listener.close(l3)
+
+def stale.got(+name: String, +want: String, pr: Http.Pool & Result<&1, &1, Http.Err, Http.Res>) -> IO(Http.Pool):
+  (p, r) = pr
+  do IO<Http.Pool>:
+    retry.check(name, 200, want, r)
+    return p
+
+def stale.stream.end(p: Http.Pool, +name: String, +want: String, got: Http.Stream & Bytes.Bytes & U32) -> IO(Http.Pool):
+  (st, body, n) = got
+  do IO<Http.Pool>:
+    local.ok(String.eq(Bytes.to_string(body), want), name)
+    Http.pool.stream.close(p, st)
+
+def stale.stream(+name: String, +want: String, pr: Http.Pool & Result<&1, &1, Http.Err, Http.Stream>) -> IO(Http.Pool):
+  (p, r) = pr
+  match r:
+    case Fail{e}:
+      IO.die(Http.Pool, 1, name ++ ": open failed")
+    case Done{st}:
+      do IO<Http.Pool>:
+        got : Http.Stream & Bytes.Bytes & U32 <- local.gz.read(20n, GrRead{st, Bytes.new(0), 0})
+        stale.stream.end(p, name, want, got)
+
+# The server closes each pooled socket; each POST must take a new connection, not fail on the dead one.
+def stale.test() -> IO(Unit):
+  do IO<Unit>:
+    l : Listener <- IO.try(Listener, TCP.listen("127.0.0.1", 47819))
+    IO.spawn(Unit, stale.serve(l))
+    first : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
+      Http.pool.fetch.with(Http.pool.new(), "GET", "http://127.0.0.1:47819/a", Http.empty(), Bytes.new(0), 2000)
+    p1 : Http.Pool <- stale.got("stale pool: GET", "a", first)
+    IO.sleep(100)
+    second : Http.Pool & Result<&1, &1, Http.Err, Http.Res> <-
+      Http.pool.fetch.with(p1, "POST", "http://127.0.0.1:47819/b", Http.empty(), Bytes.from_string("x"), 2000)
+    p2 : Http.Pool <- stale.got("stale pool: POST on a new connection after the server closed the idle one", "b", second)
+    IO.sleep(100)
+    third : Http.Pool & Result<&1, &1, Http.Err, Http.Stream> <-
+      Http.pool.open.with(p2, "POST", "http://127.0.0.1:47819/c", Http.empty(), Bytes.from_string("x"), 2000)
+    p3 : Http.Pool <- stale.stream("stale pool: streamed POST on a new connection after the server closed the idle one", "c", third)
+    Http.pool.close(p3)
+
 # The fetch.all server answers each path after 100 ms and closes its connection.
 # Sixteen requests therefore make sixteen connections, even with pooled workers.
 def all.slow(req: Http.Req) -> IO(Http.Res):
@@ -1067,6 +1146,7 @@ def main() -> IO(Unit):
     retry.test()
     local.proxy.test()
     spool.test()
+    stale.test()
     all.test()
     cookie.test()
     redir.test()

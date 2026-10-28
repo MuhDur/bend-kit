@@ -2,7 +2,7 @@
 import Base
 import ./admission.bend as Admission
 import ./completion.bend as Completion
-import bend-kit-wire@0.4.6.2/wire.bend as Wire
+import bend-kit-wire@0.4.7.0/wire.bend as Wire
 import bend-kit-http2@0.4.0.0/http2.bend as H2
 import bend-kit-http2@0.4.0.0/hpack.bend as Hpack
 import bend-kit-bytes@0.3.3.0/bytes.bend as HBytes
@@ -2734,6 +2734,62 @@ def conns.cut(xs: List<&1, Conn>, n: Nat) -> IO(List<&1, Conn>):
             r : List<&1, Conn> <- conns.cut(t, k)
             return c <> r
 
+type Took is Type:
+  TookNone{}
+  TookRaw{c: Conn}
+  TookSeen{quiet: Bool, c: Conn}
+
+def took.of(pm: Pool & Maybe<&1, Conn>) -> Pool & Took:
+  (p, m) = pm
+  match m:
+    case None{}:
+      (p, TookNone{})
+    case Some{c}:
+      (p, TookRaw{c})
+
+def took.seen(+tls: Bool, r: Socket & Bool) -> Took:
+  (s, quiet) = r
+  TookSeen{quiet, Conn{tls, s}}
+
+# HTTP/2 reads its own GOAWAY, so only an HTTP/1.1 socket is peeked.
+def conn.idle(c: Conn) -> IO(Took):
+  match c:
+    case Conn{+tls, s}:
+      do IO<Took>:
+        r : Socket & Bool <- Wire.idle(s)
+        return took.seen(tls, r)
+    case ConnH2{s, client}:
+      IO.pure(Took, TookSeen{True{}, ConnH2{s, client}})
+
+# Each idle socket takes two steps: the peek, then the close and the next take.
+def pool.take.go(n: Nat, +key: String, pt: Pool & Took) -> IO(Pool & Maybe<&1, Conn>):
+  match n pt:
+    case _ Tuple{p, TookNone{}}:
+      IO.pure(Pool & Maybe<&1, Conn>, (p, None{}))
+    case _ Tuple{p, TookSeen{True{}, c}}:
+      IO.pure(Pool & Maybe<&1, Conn>, (p, Some{c}))
+    case 0n Tuple{p, TookRaw{c}}:
+      do IO<Pool & Maybe<&1, Conn>>:
+        conn.close(c)
+        return (p, None{})
+    case 0n Tuple{p, TookSeen{False{}, c}}:
+      do IO<Pool & Maybe<&1, Conn>>:
+        conn.close(c)
+        return (p, None{})
+    case 1n+k Tuple{p, TookRaw{c}}:
+      do IO<Pool & Maybe<&1, Conn>>:
+        t : Took <- conn.idle(c)
+        pool.take.go(k, key, (p, t))
+    case 1n+k Tuple{p, TookSeen{False{}, c}}:
+      do IO<Pool & Maybe<&1, Conn>>:
+        conn.close(c)
+        pool.take.go(k, key, took.of(pool.take(p, key)))
+
+# pool.take, but an idle socket that the peer closed or that has bytes waiting is closed, and the next one is tried.
+def pool.take.live(p: Pool, +key: String) -> IO(Pool & Maybe<&1, Conn>):
+  Pool{+cap, idle} = p
+  pool.take.go((2n * U32.to_nat(cap) + 2n : Nat), key, took.of(pool.take(Pool{cap, idle}, key)))
+
 def pool.give.of(+cap: U32, +key: String, c: Conn, limit: Nat,
     r: Map<&1, List<&1, Conn>> & Maybe<&1, List<&1, Conn>>) -> IO(Pool):
   (m, old) = r
@@ -3729,7 +3785,9 @@ def origin.route(+method: String, headers: Map<&2, List<&2, String>>,
 def pool.origin.route(p: Pool, +method: String, +ms: U32, r: String & Send & Route) ->
     IO(Pool & Result<&1, &1, Err, Res>):
   (+key, request, route) = r
-  pool.idle(pool.take(p, key), key, ms, pool.idempotent(method), request, route)
+  do IO<Pool & Result<&1, &1, Err, Res>>:
+    taken : Pool & Maybe<&1, Conn> <- pool.take.live(p, key)
+    pool.idle(taken, key, ms, pool.idempotent(method), request, route)
 
 def pool.origin.choice(p: Pool, +method: String, ms: U32,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, hf: String,
@@ -4901,8 +4959,10 @@ def stream.take(taken: Pool & Maybe<&1, Conn>, +ms: U32, +head: Bool, +idem: Boo
 def stream.route(p: Pool, +ms: U32, r: String & Send & Route) -> IO(Pool & Result<&1, &1, Err, Stream>):
   (+key, request, route) = r
   Send{+method, target, authority, headers, body} = request
-  stream.take(pool.take(p, key), ms, String.eq(method, "HEAD"), pool.idempotent(method), key, route,
-    encode_req.on(method, target, authority, headers, body, False{}))
+  do IO<Pool & Result<&1, &1, Err, Stream>>:
+    taken : Pool & Maybe<&1, Conn> <- pool.take.live(p, key)
+    stream.take(taken, ms, String.eq(method, "HEAD"), pool.idempotent(method), key, route,
+      encode_req.on(method, target, authority, headers, body, False{}))
 
 def stream.origin.choice(p: Pool, +method: String, +ms: U32,
     headers: Map<&2, List<&2, String>>, body: Bytes.Bytes, hf: String,
