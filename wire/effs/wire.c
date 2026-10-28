@@ -200,6 +200,26 @@ static void __attribute__((constructor)) wire_recv_words_use(void) {
 
 #endif
 
+#ifdef CID(idle)
+
+// MSG_PEEK leaves a waiting byte for the next read.
+Term wire_idle_run(Env e, Term* f, IoWork* w) {
+  intptr_t h = (intptr_t)io_hand_v(f[0]);
+  char     b;
+  ssize_t  n;
+  do {
+    n = recv((int)h, &b, 1, MSG_PEEK | MSG_DONTWAIT);
+  } while (n < 0 && errno == EINTR);
+  bool quiet = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+  return io_tup(e, io_hand(h), term_pak(quiet ? CID(True) : CID(False), 0));
+}
+
+static void __attribute__((constructor)) wire_idle_use(void) {
+  io_eff(CID(idle), wire_idle_run);
+}
+
+#endif
+
 #if defined(CID(send)) || defined(CID(send.words))
 
 static Term wire_send_more(Env e, IoWork* w) {
