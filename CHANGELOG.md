@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `jwt` 0.11.0.1, `llm` 0.13.0.1, `oauth2` 0.11.0.1, `sigv4` 0.11.0.1, `webhooks` 0.11.0.1: import `http` 0.38.1.1 and `hairpin` 0.13.0.1, so a pooled request does not reuse a socket that the server closed. `jwt`, `oauth2`, `sigv4`, and `webhooks` also import `crypto` 0.2.2.2.
 - `camber` 0.15.0.1, `hairpin` 0.13.0.1: import `http` 0.38.1.1, so a pooled request does not reuse a socket that the server closed.
 - `bits` 0.1.0.0: new package. A bit reader and a bit writer over `Bytes`, LSB-first (DEFLATE) or MSB-first (JPEG), for fields of 0 to 32 bits, and canonical Huffman decode tables built from code lengths. Proved on fixtures: written fields read back in both orders, and the fixed DEFLATE code decodes all 288 symbols.
 - `gateway` 0.3.0.0, `runner` 0.11.0.0: import `bytes` 0.3.3.0, `collections` 0.1.4.1, and the re-pinned `cache`, `camber`, `hairpin`, `http`, `journal`, `scheduler`, `time`, `files`, and `webhooks`. Every package in the kit now uses one version of each sibling. Breaking: sibling types come from the new versions.
