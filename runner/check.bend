@@ -162,6 +162,7 @@ def snapshots() -> IO(Unit):
     same(brk(sample(), "local"), "open 1700000000123", "a later Break replaces the target's breaker")
     same(brk(sample(), "λ:443"), "closed 1 1700000000123", "a Break keeps a closed breaker's failures")
     same(brk(sample(), "none"), "closed", "a target with no Break is closed")
+    same(hex(live([R.Break{"t", Retry.CircuitClosed{[7n]}}, R.Break{"t", Retry.CircuitClosed{[]}}], R.new(String))), hex(R.new(String)), "a target that failed and then recovered leaves no breaker in the snapshot")
     same(brk(R.calm(String, sample()), "h"), "half 0", "open counts no probe of a half-open breaker in flight")
     same(brk(R.calm(String, sample()), "local"), "open 1700000000123", "open keeps an open breaker's until")
     same(rec(R.encode.snap(~String, ~penc, R.new(String))), hex(R.new(String)), "an empty snapshot round-trips")

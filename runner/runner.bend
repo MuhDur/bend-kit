@@ -257,6 +257,14 @@ def step.revived(~A: Data, m: Maybe<&2, Dead<A>>, +i: Nat, n: Nat, h: H.Heap<Q.T
     case Some{Dead{Q.Ticket{k, old, x}, w, at}}:
       State{Q.State{n, H.Heap.push(~Q.Ticket<A>, ~(a => b => Q.le(A, a, b)), Q.Ticket{i, d, x}, h), r}, O.OMap.put(~Nat, ~Try, ~Nat.cmp, ts, i, Try{0n, d}), ds, bs}
 
+# A closed breaker with no failures reads the same as an absent one, so it leaves the map.
+def step.broke(bs: Breakers(), k: String, b: Retry.State) -> Breakers():
+  match b:
+    case Retry.CircuitClosed{Nil{}}:
+      Map.del(&2, Retry.State, bs, k)
+    case b:
+      Map.set(&2, Retry.State, bs, k, b)
+
 # The state after op. Live and replay both run it, so they agree.
 def step(~A: Data, s: State<A>, op: Op<A>) -> State<A>:
   match s op:
@@ -281,7 +289,7 @@ def step(~A: Data, s: State<A>, op: Op<A>) -> State<A>:
     case State{q, ts, ds, bs} PurgeAll{}:
       State{q, ts, M.HMap.new(Nat, Dead<A>), bs}
     case State{q, ts, ds, bs} Break{k, b}:
-      State{q, ts, ds, Map.set(&2, Retry.State, bs, k, b)}
+      State{q, ts, ds, step.broke(bs, k, b)}
 
 def apply.op(~A: Data, m: Maybe<&2, Op<A>>, s: State<A>) -> Maybe<&2, State<A>>:
   match m:
