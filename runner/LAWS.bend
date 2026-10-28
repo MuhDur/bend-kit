@@ -1,6 +1,6 @@
 import Base
 import bend-mathlib@0.7.4.0/nat.bend as MNat
-import bend-kit-scheduler@0.4.0.0/queue.bend as Q
+import bend-kit-scheduler@0.4.1.0/queue.bend as Q
 import bend-kit-collections@0.1.4.1/heap.bend as H
 import bend-kit-collections@0.1.4.1/LAWS.bend as CL
 import bend-kit-resources@0.1.0.0/resources.bend as Res
