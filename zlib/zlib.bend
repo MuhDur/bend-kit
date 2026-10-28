@@ -125,7 +125,8 @@ def out.grow(fits: Bool, o: Out, +want: U32) -> Out:
       +d = out.dep(28n, False{}, dep, want)
       Out{Bytes.dst(Bytes.copy(n, buf, Array.new(U32, bits(d), 0), 0, 0)), d, n}
 
-# The buffer doubles until k more bytes fit, so output is O(total).
+# The buffer doubles until k more bytes fit, so output is O(total), and it ends as the
+# fewest 2^dep words that hold n, as Bytes expects.
 def out.room(o: Out, +k: U32) -> Out:
   Out{buf, +dep, +n} = o
   +want = (n + k : U32)
@@ -511,7 +512,7 @@ def inf.start(ok: Bool, +len: U32, buf: Array<U32>, +at: U32) -> Maybe<&1, Infla
       None{}
     case True{}:
       +fuel = Nat.add(Nat.mul(bits((len - at : U32)), 8n), 8n)
-      inf.result(inf.go(fuel, Is{Br{Bits.Reader{len, buf, (at << 3n : U32)}, False{}}, Out{Array.new(U32, 4n, 0), 4, 0}, MoHead{}, False{}}))
+      inf.result(inf.go(fuel, Is{Br{Bits.Reader{len, buf, (at << 3n : U32)}, False{}}, Out{Array.new(U32, 0n, 0), 0, 0}, MoHead{}, False{}}))
 
 # A raw DEFLATE stream that starts at byte at.
 def inflate.at(b: Bytes.Bytes, +at: U32) -> Maybe<&1, Inflated>:
