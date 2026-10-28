@@ -35,12 +35,6 @@ def Laws.unzlib_ok():
 def Laws.unzlib_bad_adler():
   {==}
 
-def Laws.crc32_hello():
-  {==}
-
-def Laws.adler32_hello():
-  {==}
-
 def Laws.inflate_matches():
   {==}
 
