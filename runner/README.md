@@ -3,7 +3,7 @@
 A durable job runner (an outbox). It keeps a scheduler queue in a journal, bounds the attempts that run at once with a resources pool, and retries failed jobs with retry's policy and a breaker per target.
 
 ```bend
-import bend-kit-runner@0.12.0.0/runner.bend as R
+import bend-kit-runner@0.12.0.1/runner.bend as R
 ```
 
 It imports `bend-kit-journal@0.3.0.1`, `bend-kit-scheduler@0.4.1.0`, `bend-kit-resources@0.1.0.0`, `bend-kit-retry@0.2.0.0`, `bend-kit-time@0.3.0.0`, `bend-kit-collections@0.1.4.1`, `bend-kit-files@0.3.0.0`, and `bend-kit-bytes@0.3.3.0`. Payload codecs take and give that version's `Bytes`. Policies, budgets, and outcomes are `bend-kit-retry@0.2.0.0` types; tickets are `bend-kit-scheduler@0.4.1.0` types.
@@ -32,7 +32,7 @@ A job is a `String`. `work` prints it and succeeds. The journal file keeps the j
 import Base
 import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
-import bend-kit-runner@0.12.0.0/runner.bend as R
+import bend-kit-runner@0.12.0.1/runner.bend as R
 
 def penc(s: String) -> Bytes.Bytes:
   Bytes.from_string(s)
@@ -117,7 +117,7 @@ Every transition is one journal record, appended and fsynced before the state ch
 | `Revive{id, d}` | `revive` | the dead ticket `id` goes back to the pending heap at `d`, with a `Try{0, d}` |
 | `Purge{before}` | `purge` | each dead ticket whose `at` is below `before` is dropped |
 | `PurgeAll{}` | `purge.all` | every dead ticket is dropped |
-| `Break{target, state}` | an admit or an outcome changed the target's breaker | the target's breaker becomes `state` |
+| `Break{target, state}` | an admit or an outcome changed the target's breaker | the target's breaker becomes `state`; a closed `state` with no failures drops the target |
 
 The dead tickets are a `collections` hash trie keyed by ticket id, so `Cancel` and `Revive` of a dead ticket take a fixed number of steps, whatever the count of dead tickets. A `Purge` walks every dead ticket once.
 
