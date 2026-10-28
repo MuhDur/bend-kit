@@ -1,7 +1,7 @@
 # Durable job runner: a journaled scheduler queue, bounded by a resources pool, with retry and a breaker per target. Source: https://github.com/paymog/bend-kit/tree/main/runner
 import Base
 import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
-import bend-kit-journal@0.3.0.0/journal.bend as J
+import bend-kit-journal@0.3.0.1/journal.bend as J
 import bend-kit-scheduler@0.4.0.0/queue.bend as Q
 import bend-kit-resources@0.1.0.0/resources.bend as Res
 import bend-kit-retry@0.2.0.0/retry.bend as Retry
